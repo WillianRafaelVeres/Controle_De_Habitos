@@ -1,22 +1,39 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { AlertTriangle, Award, BarChart3, CalendarCheck, ChevronLeft, ChevronRight, Percent, TrendingUp } from 'lucide-react-native';
+import {
+  AlertTriangle,
+  Award,
+  BarChart3,
+  CalendarCheck,
+  ChevronLeft,
+  ChevronRight,
+  Flame,
+  History,
+  Percent,
+  Target,
+  TrendingUp,
+  Trophy,
+} from 'lucide-react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { MetricCard } from '../../components/MetricCard';
+import { MiniBarChart } from '../../components/MiniBarChart';
 import { MonthlyLineChart } from '../../components/MonthlyLineChart';
 import { ProgressBar } from '../../components/ProgressBar';
 import { Screen } from '../../components/Screen';
 import { SectionHeader } from '../../components/SectionHeader';
 import { YearlyLineChart } from '../../components/YearlyLineChart';
-import { getLogsForRange, getRoutines } from '../../database';
+import { getAllLogs, getAllRoutines } from '../../database';
 import { colors, radii, spacing, typography } from '../../theme';
 import type { Routine, RoutineLog, RoutineProgress } from '../../types';
 import {
+  addDays,
   buildDailyProgressForMonth,
   buildMonthlyProgressForYear,
+  calculateDailyPercentage,
   calculateMonthlyAverage,
+  dateToKey,
   formatMonthTitle,
   getMonthRange,
   getYearRange,
@@ -24,30 +41,36 @@ import {
   nextYear,
   previousMonth,
   previousYear,
+  todayKey,
 } from '../../utils/date';
-import { buildMonthStats } from '../../utils/metrics';
+import {
+  buildLastDaysCompletionTotals,
+  buildMonthStats,
+  buildMonthlyCompletionTotals,
+  calculateBestCompleteRoutineStreak,
+  calculateCompleteRoutineStreak,
+  calculateCompletionRate,
+  countCompletedLogs,
+  getBestMonth,
+  getBestWeekday,
+} from '../../utils/metrics';
 import { getRoutineColor, getRoutineIcon } from '../../utils/routineVisuals';
+
+type WeekdayScope = 'month' | 'last30' | 'history';
 
 export function StatsScreen() {
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [logs, setLogs] = useState<RoutineLog[]>([]);
-  const [yearLogs, setYearLogs] = useState<RoutineLog[]>([]);
   const [selectedMonth, setSelectedMonth] = useState(() => new Date());
   const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
+  const [weekdayScope, setWeekdayScope] = useState<WeekdayScope>('month');
 
   const loadStats = useCallback(async () => {
-    const monthRange = getMonthRange(selectedMonth);
-    const yearRange = getYearRange(selectedYear);
-    const [activeRoutines, monthLogs, logsForYear] = await Promise.all([
-      getRoutines(false),
-      getLogsForRange(monthRange.start, monthRange.end),
-      getLogsForRange(yearRange.start, yearRange.end),
-    ]);
+    const [allRoutines, allLogs] = await Promise.all([getAllRoutines(), getAllLogs()]);
 
-    setRoutines(activeRoutines);
-    setLogs(monthLogs);
-    setYearLogs(logsForYear);
-  }, [selectedMonth, selectedYear]);
+    setRoutines(allRoutines);
+    setLogs(allLogs);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -55,11 +78,50 @@ export function StatsScreen() {
     }, [loadStats]),
   );
 
-  const stats = useMemo(() => buildMonthStats(routines, logs, selectedMonth), [logs, routines, selectedMonth]);
-  const monthlyLineData = useMemo(() => buildDailyProgressForMonth(selectedMonth, routines, logs), [logs, routines, selectedMonth]);
+  const monthRange = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
+  const yearRange = useMemo(() => getYearRange(selectedYear), [selectedYear]);
+  const monthLogs = useMemo(
+    () => logs.filter((log) => log.date >= monthRange.start && log.date <= monthRange.end),
+    [logs, monthRange.end, monthRange.start],
+  );
+  const yearLogs = useMemo(
+    () => logs.filter((log) => log.date >= yearRange.start && log.date <= yearRange.end),
+    [logs, yearRange.end, yearRange.start],
+  );
+  const last30Start = useMemo(() => dateToKey(addDays(new Date(), -29)), []);
+  const last30Logs = useMemo(() => logs.filter((log) => log.date >= last30Start && log.date <= todayKey()), [last30Start, logs]);
+  const stats = useMemo(() => buildMonthStats(routines, monthLogs, selectedMonth), [monthLogs, routines, selectedMonth]);
+  const monthlyLineData = useMemo(() => buildDailyProgressForMonth(selectedMonth, routines, monthLogs), [monthLogs, routines, selectedMonth]);
   const yearlyLineData = useMemo(() => buildMonthlyProgressForYear(selectedYear, routines, yearLogs), [routines, selectedYear, yearLogs]);
-  const monthlyAverage = useMemo(() => calculateMonthlyAverage(selectedMonth, routines, logs), [logs, routines, selectedMonth]);
+  const monthlyAverage = useMemo(() => calculateMonthlyAverage(selectedMonth, routines, monthLogs), [monthLogs, routines, selectedMonth]);
+  const monthCompletionRate = useMemo(
+    () => calculateCompletionRate(routines, logs, monthRange.start, monthRange.end),
+    [logs, monthRange.end, monthRange.start, routines],
+  );
+  const currentStreak = useMemo(() => calculateCompleteRoutineStreak(routines, logs), [logs, routines]);
+  const bestStreak = useMemo(() => calculateBestCompleteRoutineStreak(routines, logs), [logs, routines]);
+  const totalHistory = useMemo(() => countCompletedLogs(logs), [logs]);
+  const totalLast30 = useMemo(() => countCompletedLogs(last30Logs), [last30Logs]);
+  const currentActiveRoutines = useMemo(() => routines.filter((routine) => routine.is_active === 1 && !routine.archived_at), [routines]);
+  const todayProgress = useMemo(() => calculateDailyPercentage(todayKey(), currentActiveRoutines, logs), [currentActiveRoutines, logs]);
+  const weeklyData = useMemo(() => buildLastDaysCompletionTotals(logs, 7), [logs]);
+  const totalLast7 = useMemo(() => weeklyData.reduce((sum, item) => sum + item.value, 0), [weeklyData]);
+  const monthlyTotals = useMemo(() => buildMonthlyCompletionTotals(yearLogs), [yearLogs]);
+  const bestMonth = useMemo(() => getBestMonth(logs), [logs]);
+  const scopedWeekdayLogs = useMemo(() => {
+    if (weekdayScope === 'month') {
+      return monthLogs;
+    }
+
+    if (weekdayScope === 'last30') {
+      return last30Logs;
+    }
+
+    return logs;
+  }, [last30Logs, logs, monthLogs, weekdayScope]);
+  const bestWeekday = useMemo(() => getBestWeekday(scopedWeekdayLogs), [scopedWeekdayLogs]);
   const maxCompleted = Math.max(...stats.routineProgress.map((item) => item.completed), 1);
+  const hasAnyData = routines.length > 0 || totalHistory > 0;
 
   return (
     <Screen contentStyle={styles.screen}>
@@ -75,34 +137,77 @@ export function StatsScreen() {
         onToday={() => setSelectedMonth(new Date())}
       />
 
-      {routines.length === 0 ? (
+      {!hasAnyData ? (
         <EmptyState
           icon={BarChart3}
-          title="Sem rotinas ativas"
-          subtitle="Ative ou cadastre rotinas para calcular progresso, medias e desempenho mensal."
+          title="Sem dados historicos"
+          subtitle="Cadastre rotinas e marque conclusoes para calcular progresso, medias e desempenho mensal."
         />
       ) : (
         <>
           <Card style={styles.overallCard}>
             <View style={styles.overallTop}>
               <View>
-                <Text style={styles.cardLabel}>Progresso mensal geral</Text>
-                <Text style={styles.overallValue}>{stats.overallProgress}%</Text>
+                <Text style={styles.cardLabel}>Taxa de cumprimento mensal</Text>
+                <Text style={styles.overallValue}>{monthCompletionRate.percentage}%</Text>
               </View>
               <View style={styles.overallIcon}>
                 <TrendingUp color={colors.secondary} size={26} strokeWidth={2.4} />
               </View>
             </View>
-            <ProgressBar value={stats.overallProgress} />
+            <ProgressBar value={monthCompletionRate.percentage} />
             <Text style={styles.progressDetail}>
-              {stats.totalCompleted} de {stats.totalGoal} conclusoes esperadas pela meta percentual
+              {monthCompletionRate.completed} de {monthCompletionRate.expected} metas previstas no periodo
             </Text>
           </Card>
 
           <View style={styles.metricRow}>
-            <MetricCard label="Media mensal" value={`${monthlyAverage}%`} icon={Percent} accent={colors.secondary} />
-            <MetricCard label="Dias completos" value={`${stats.completeDays}`} icon={CalendarCheck} accent={colors.success} />
+            <MetricCard label="Hoje" value={`${todayProgress.completed}/${todayProgress.total}`} detail={`${todayProgress.percentage}% do dia`} icon={Target} accent={colors.secondary} />
+            <MetricCard label="Mes selecionado" value={`${stats.totalCompleted}`} detail="Conclusoes" icon={CalendarCheck} accent={colors.success} />
           </View>
+
+          <View style={styles.metricRow}>
+            <MetricCard label="Sequencia atual" value={`${currentStreak}d`} detail="Dias completos" icon={Flame} accent={colors.warning} />
+            <MetricCard label="Melhor sequencia" value={`${bestStreak}d`} detail="Historico" icon={Trophy} accent={colors.primary} />
+          </View>
+
+          <View style={styles.metricRow}>
+            <MetricCard label="Ultimos 7 dias" value={`${totalLast7}`} detail="Conclusoes" icon={BarChart3} accent={colors.secondary} />
+            <MetricCard label="Ultimos 30 dias" value={`${totalLast30}`} detail="Conclusoes" icon={History} accent={colors.success} />
+          </View>
+
+          <View style={styles.metricRow}>
+            <MetricCard label="Media mensal" value={`${monthlyAverage}%`} detail="Dias com metas" icon={Percent} accent={colors.secondary} />
+            <MetricCard label="Total historico" value={`${totalHistory}`} detail="Inclui arquivadas" icon={History} accent={colors.primary} />
+          </View>
+
+          <Card style={styles.cardGap}>
+            <View style={styles.chartHeader}>
+              <SectionHeader title="Melhores periodos" subtitle="Conclusoes por data registrada" />
+              <ScopeSelector value={weekdayScope} onChange={setWeekdayScope} />
+            </View>
+            <View style={styles.highlightRow}>
+              <InsightCard
+                title="Melhor dia"
+                value={bestWeekday?.label ?? '-'}
+                detail={bestWeekday ? `${bestWeekday.total} conclusoes` : 'Sem dados'}
+                icon={Award}
+                accent={colors.warning}
+              />
+              <InsightCard
+                title="Melhor mes"
+                value={bestMonth?.label ?? '-'}
+                detail={bestMonth ? `${bestMonth.total} conclusoes` : 'Sem dados'}
+                icon={Trophy}
+                accent={colors.primary}
+              />
+            </View>
+          </Card>
+
+          <Card style={styles.cardGap}>
+            <SectionHeader title="Evolucao semanal" subtitle="Conclusoes nos ultimos 7 dias" />
+            <MiniBarChart data={weeklyData} maxValue={Math.max(...weeklyData.map((item) => item.value), 1)} />
+          </Card>
 
           <View style={styles.highlightRow}>
             <HighlightCard title="Melhor rotina" item={stats.bestRoutine} icon={Award} accent={colors.warning} />
@@ -127,7 +232,23 @@ export function StatsScreen() {
           </Card>
 
           <Card style={styles.cardGap}>
-            <SectionHeader title="Progresso por rotina" subtitle="Meta percentual calculada pelo tamanho do mes" />
+            <SectionHeader title="Evolucao mensal" subtitle={`Total de conclusoes em ${selectedYear}`} />
+            <View style={styles.monthTotalsList}>
+              {monthlyTotals.length === 0 ? (
+                <Text style={styles.emptyText}>Sem conclusoes neste ano.</Text>
+              ) : (
+                monthlyTotals.map((item) => (
+                  <View key={item.monthKey} style={styles.monthTotalRow}>
+                    <Text style={styles.monthTotalLabel}>{item.label}</Text>
+                    <Text style={styles.monthTotalValue}>{item.total}</Text>
+                  </View>
+                ))
+              )}
+            </View>
+          </Card>
+
+          <Card style={styles.cardGap}>
+            <SectionHeader title="Progresso por rotina" subtitle="Meta calculada pelo periodo em que a rotina existia" />
             <View style={styles.progressList}>
               {stats.routineProgress.map((item) => (
                 <RoutineProgressRow key={item.routine.id} item={item} />
@@ -198,6 +319,59 @@ function IconButton({ onPress, icon: Icon }: { onPress: () => void; icon: typeof
   );
 }
 
+function ScopeSelector({ value, onChange }: { value: WeekdayScope; onChange: (value: WeekdayScope) => void }) {
+  const options: Array<{ value: WeekdayScope; label: string }> = [
+    { value: 'month', label: 'Mes' },
+    { value: 'last30', label: '30 dias' },
+    { value: 'history', label: 'Historico' },
+  ];
+
+  return (
+    <View style={styles.scopeRow}>
+      {options.map((option) => {
+        const selected = option.value === value;
+
+        return (
+          <Pressable
+            key={option.value}
+            onPress={() => onChange(option.value)}
+            style={[styles.scopeButton, selected && styles.scopeButtonActive]}
+          >
+            <Text style={[styles.scopeText, selected && styles.scopeTextActive]}>{option.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function InsightCard({
+  title,
+  value,
+  detail,
+  icon: Icon,
+  accent,
+}: {
+  title: string;
+  value: string;
+  detail: string;
+  icon: typeof Award;
+  accent: string;
+}) {
+  return (
+    <Card style={styles.highlightCard}>
+      <View style={[styles.highlightIcon, { backgroundColor: `${accent}20` }]}>
+        <Icon color={accent} size={20} strokeWidth={2.4} />
+      </View>
+      <Text style={styles.highlightTitle}>{title}</Text>
+      <Text style={styles.highlightName} numberOfLines={1} adjustsFontSizeToFit>
+        {value}
+      </Text>
+      <Text style={styles.highlightDetail}>{detail}</Text>
+    </Card>
+  );
+}
+
 function HighlightCard({
   title,
   item,
@@ -241,7 +415,7 @@ function RoutineProgressRow({ item }: { item: RoutineProgress }) {
         </View>
         <ProgressBar value={item.percentage} color={accent} />
         <Text style={styles.progressSmall}>
-          Meta: {item.goalPercent}% ({item.goal} dias neste mes) - {item.completed} concluidos
+          Meta: {item.goalPercent}% ({item.goal} dias previstos) - {item.completed} concluidos
         </Text>
       </View>
     </View>
@@ -349,6 +523,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.md,
   },
+  scopeRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  scopeButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(148, 163, 184, 0.08)',
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    flex: 1,
+    minHeight: 36,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+  },
+  scopeButtonActive: {
+    backgroundColor: 'rgba(38, 217, 255, 0.14)',
+    borderColor: 'rgba(38, 217, 255, 0.32)',
+  },
+  scopeText: {
+    color: colors.textMuted,
+    fontSize: typography.tiny,
+    fontWeight: '900',
+  },
+  scopeTextActive: {
+    color: colors.secondary,
+  },
   highlightCard: {
     flex: 1,
     minHeight: 146,
@@ -392,6 +593,36 @@ const styles = StyleSheet.create({
   },
   cardGap: {
     gap: spacing.md,
+  },
+  monthTotalsList: {
+    gap: spacing.sm,
+  },
+  monthTotalRow: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(148, 163, 184, 0.08)',
+    borderRadius: radii.md,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  monthTotalLabel: {
+    color: colors.text,
+    flex: 1,
+    fontSize: typography.small,
+    fontWeight: '800',
+  },
+  monthTotalValue: {
+    color: colors.secondary,
+    fontSize: typography.body,
+    fontWeight: '900',
+    minWidth: 34,
+    textAlign: 'right',
+  },
+  emptyText: {
+    color: colors.textMuted,
+    fontSize: typography.small,
   },
   progressList: {
     gap: spacing.lg,

@@ -27,28 +27,78 @@ export async function getLogsForRange(startDate: string, endDate: string) {
   );
 }
 
+export async function getAllLogs() {
+  const db = await getDatabase();
+
+  return db.getAllAsync<RoutineLog>(
+    `
+      SELECT *
+      FROM routine_logs
+      ORDER BY date ASC, created_at ASC
+    `,
+  );
+}
+
+export async function setRoutineCompletion(routineId: string, date: string, completed: boolean) {
+  const db = await getDatabase();
+  const timestamp = nowIso();
+  const routine = await db.getFirstAsync<{ name: string }>('SELECT name FROM routines WHERE id = ?', [routineId]);
+  const existing = await db.getFirstAsync<RoutineLog>('SELECT * FROM routine_logs WHERE routine_id = ? AND date = ?', [routineId, date]);
+
+  if (!routine) {
+    throw new Error('Rotina nao encontrada.');
+  }
+
+  if (existing) {
+    await db.runAsync(
+      `
+        UPDATE routine_logs
+        SET completed = ?,
+            routine_name_snapshot = CASE
+              WHEN ? = 1 THEN ?
+              ELSE routine_name_snapshot
+            END,
+            completed_at = ?,
+            updated_at = ?
+        WHERE id = ?
+      `,
+      [completed ? 1 : 0, completed ? 1 : 0, routine.name, completed ? timestamp : null, timestamp, existing.id],
+    );
+    return completed;
+  }
+
+  if (!completed) {
+    return false;
+  }
+
+  await db.runAsync(
+    `
+      INSERT INTO routine_logs (
+        id,
+        routine_id,
+        routine_name_snapshot,
+        date,
+        completed,
+        completed_at,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+    `,
+    [createId('log'), routineId, routine.name, date, timestamp, timestamp, timestamp],
+  );
+
+  return true;
+}
+
 export async function toggleRoutineCompletion(routineId: string, date = todayKey()) {
   const db = await getDatabase();
   const existing = await db.getFirstAsync<RoutineLog>(
     'SELECT * FROM routine_logs WHERE routine_id = ? AND date = ?',
     [routineId, date],
   );
-  const nextCompleted = existing?.completed === 1 ? 0 : 1;
 
-  if (existing) {
-    await db.runAsync('UPDATE routine_logs SET completed = ? WHERE id = ?', [nextCompleted, existing.id]);
-    return nextCompleted === 1;
-  }
-
-  await db.runAsync(
-    `
-      INSERT INTO routine_logs (id, routine_id, date, completed, created_at)
-      VALUES (?, ?, ?, 1, ?)
-    `,
-    [createId('log'), routineId, date, nowIso()],
-  );
-
-  return true;
+  return setRoutineCompletion(routineId, date, existing?.completed !== 1);
 }
 
 export async function countLogs() {

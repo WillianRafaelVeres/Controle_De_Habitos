@@ -148,6 +148,23 @@ export function formatReadableDate(dateKey: string) {
   }).format(parseDateKey(dateKey));
 }
 
+export function formatMonthYear(dateKey: string) {
+  const formatted = new Intl.DateTimeFormat('pt-BR', {
+    month: 'long',
+    year: 'numeric',
+  }).format(parseDateKey(`${dateKey}-01`));
+
+  return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+}
+
+export function getDateKeyFromIso(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  return dateToKey(new Date(value));
+}
+
 export function getGreeting() {
   const hour = new Date().getHours();
 
@@ -162,24 +179,46 @@ export function getGreeting() {
   return 'Boa noite';
 }
 
-export function calculateDailyPercentage(dateKey: string, routines: Routine[], logs: RoutineLog[]) {
-  const activeRoutines = routines.filter((routine) => routine.is_active === 1);
+export function wasRoutineAvailableOnDate(routine: Routine, dateKey: string) {
+  const createdKey = getDateKeyFromIso(routine.created_at);
+  const archivedKey = getDateKeyFromIso(routine.archived_at);
 
-  if (activeRoutines.length === 0) {
+  if (createdKey && createdKey > dateKey) {
+    return false;
+  }
+
+  return !archivedKey || archivedKey > dateKey;
+}
+
+export function getRoutinesForDate(dateKey: string, routines: Routine[], logs: RoutineLog[] = []) {
+  const loggedRoutineIds = new Set(logs.filter((log) => log.date === dateKey).map((log) => log.routine_id));
+
+  return routines.filter((routine) => wasRoutineAvailableOnDate(routine, dateKey) || loggedRoutineIds.has(routine.id));
+}
+
+export function countExpectedRoutinesForDate(dateKey: string, routines: Routine[]) {
+  return routines.filter((routine) => wasRoutineAvailableOnDate(routine, dateKey)).length;
+}
+
+export function calculateDailyPercentage(dateKey: string, routines: Routine[], logs: RoutineLog[]) {
+  const routinesForDate = getRoutinesForDate(dateKey, routines, logs);
+
+  if (routinesForDate.length === 0) {
     return { percentage: 0, completed: 0, total: 0 };
   }
 
-  const activeIds = new Set(activeRoutines.map((routine) => routine.id));
+  const routineIds = new Set(routinesForDate.map((routine) => routine.id));
   const completed = new Set(
     logs
-      .filter((log) => log.date === dateKey && log.completed === 1 && activeIds.has(log.routine_id))
+      .filter((log) => log.date === dateKey && log.completed === 1 && routineIds.has(log.routine_id))
       .map((log) => log.routine_id),
   ).size;
+  const total = Math.max(routinesForDate.length, completed);
 
   return {
-    percentage: Math.round((completed / activeRoutines.length) * 100),
+    percentage: total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0,
     completed,
-    total: activeRoutines.length,
+    total,
   };
 }
 
@@ -197,12 +236,13 @@ export function buildDailyProgressForMonth(date: Date, routines: Routine[], logs
 
 export function calculateMonthlyAverage(date: Date, routines: Routine[], logs: RoutineLog[]) {
   const points = buildDailyProgressForMonth(date, routines, logs);
+  const daysWithExpectedRoutines = points.filter((point) => point.total > 0);
 
-  if (points.length === 0 || routines.filter((routine) => routine.is_active === 1).length === 0) {
+  if (daysWithExpectedRoutines.length === 0) {
     return 0;
   }
 
-  return Math.round(points.reduce((sum, point) => sum + point.percentage, 0) / points.length);
+  return Math.round(daysWithExpectedRoutines.reduce((sum, point) => sum + point.percentage, 0) / daysWithExpectedRoutines.length);
 }
 
 export function buildMonthlyProgressForYear(year: number, routines: Routine[], logs: RoutineLog[]): MonthlyProgressPoint[] {
@@ -221,10 +261,11 @@ export function buildMonthlyProgressForYear(year: number, routines: Routine[], l
 
 export function calculateAnnualAverage(year: number, routines: Routine[], logs: RoutineLog[]) {
   const points = buildMonthlyProgressForYear(year, routines, logs);
+  const monthsWithExpectedRoutines = points.filter((point) => point.percentage > 0);
 
-  if (points.length === 0 || routines.filter((routine) => routine.is_active === 1).length === 0) {
+  if (monthsWithExpectedRoutines.length === 0) {
     return 0;
   }
 
-  return Math.round(points.reduce((sum, point) => sum + point.percentage, 0) / points.length);
+  return Math.round(monthsWithExpectedRoutines.reduce((sum, point) => sum + point.percentage, 0) / monthsWithExpectedRoutines.length);
 }

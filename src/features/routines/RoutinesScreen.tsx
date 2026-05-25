@@ -64,17 +64,19 @@ export function RoutinesScreen() {
   }
 
   function handleDelete(routine: Routine) {
-    Alert.alert('Excluir rotina', `Excluir "${routine.name}" e todos os registros dela?`, [
+    Alert.alert('Remover rotina', `Remover "${routine.name}" da rotina atual? Os registros anteriores serao mantidos no historico e nas estatisticas.`, [
       { text: 'Cancelar', style: 'cancel' },
       {
-        text: 'Excluir',
+        text: 'Remover',
         style: 'destructive',
         onPress: async () => {
           await deleteRoutine(routine.id);
           await loadRoutines();
         },
       },
-    ]);
+    ], {
+      cancelable: true,
+    });
   }
 
   return (
@@ -84,7 +86,7 @@ export function RoutinesScreen() {
         <PrimaryButton label="Nova" icon={Plus} onPress={openCreate} style={styles.addButton} />
       </View>
 
-      <SectionHeader title="Cadastro" subtitle={`${routines.length} rotinas no banco local`} />
+      <SectionHeader title="Cadastro" subtitle={`${routines.length} rotinas atuais no banco local`} />
 
       {routines.length === 0 ? (
         <EmptyState icon={Plus} title="Comece por uma rotina" subtitle="Cadastre uma rotina diaria para liberar progresso, calendario e estatisticas." />

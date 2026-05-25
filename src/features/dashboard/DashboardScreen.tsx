@@ -62,6 +62,7 @@ export function DashboardScreen() {
       value: streakLogs.filter((log) => log.date === day.key && log.completed === 1).length,
     }));
   }, [streakLogs]);
+  const weeklyCompleted = useMemo(() => weeklyData.reduce((sum, item) => sum + item.value, 0), [weeklyData]);
 
   useEffect(() => {
     Animated.spring(completionAnim, {
@@ -109,7 +110,7 @@ export function DashboardScreen() {
         </View>
         <ProgressBar value={dailyProgress} />
         <Text style={styles.progressDetail}>
-          {completedToday} de {routines.length} rotinas concluidas hoje
+          Metas concluidas hoje: {completedToday} de {routines.length}
         </Text>
         {allDoneToday ? (
           <Animated.View
@@ -138,9 +139,9 @@ export function DashboardScreen() {
       <View style={styles.metricRow}>
         <MetricCard label="Streak atual" value={`${streak}d`} detail="Dias seguidos" icon={Flame} accent={colors.warning} />
         <MetricCard
-          label="Hoje"
-          value={`${completedToday}/${routines.length}`}
-          detail="Rotinas feitas"
+          label="Ultimos 7 dias"
+          value={`${weeklyCompleted}`}
+          detail="Conclusoes"
           icon={CalendarCheck}
           accent={colors.success}
         />

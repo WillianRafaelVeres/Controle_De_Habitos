@@ -27,8 +27,21 @@ export async function getRoutines(includeInactive = true) {
     `
       SELECT *
       FROM routines
-      ${includeInactive ? '' : 'WHERE is_active = 1'}
+      WHERE archived_at IS NULL
+      ${includeInactive ? '' : 'AND is_active = 1'}
       ORDER BY is_active DESC, created_at ASC
+    `,
+  );
+}
+
+export async function getAllRoutines() {
+  const db = await getDatabase();
+
+  return db.getAllAsync<Routine>(
+    `
+      SELECT *
+      FROM routines
+      ORDER BY archived_at IS NOT NULL ASC, is_active DESC, created_at ASC
     `,
   );
 }
@@ -54,6 +67,7 @@ export async function createRoutine(values: RoutineFormValues) {
     monthly_goal: null,
     monthly_goal_percent: normalized.monthly_goal_percent,
     is_active: 1,
+    archived_at: null,
     created_at: timestamp,
     updated_at: timestamp,
   };
@@ -62,9 +76,9 @@ export async function createRoutine(values: RoutineFormValues) {
     `
       INSERT INTO routines (
         id, name, description, category, icon, color, frequency,
-        monthly_goal, monthly_goal_percent, is_active, created_at, updated_at
+        monthly_goal, monthly_goal_percent, is_active, archived_at, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       routine.id,
@@ -77,6 +91,7 @@ export async function createRoutine(values: RoutineFormValues) {
       routine.monthly_goal,
       routine.monthly_goal_percent,
       routine.is_active,
+      routine.archived_at,
       routine.created_at,
       routine.updated_at,
     ],
@@ -124,7 +139,7 @@ export async function updateRoutine(id: string, values: RoutineFormValues) {
 export async function setRoutineActive(id: string, isActive: boolean) {
   const db = await getDatabase();
 
-  await db.runAsync('UPDATE routines SET is_active = ?, updated_at = ? WHERE id = ?', [
+  await db.runAsync('UPDATE routines SET is_active = ?, updated_at = ? WHERE id = ? AND archived_at IS NULL', [
     isActive ? 1 : 0,
     nowIso(),
     id,
@@ -133,8 +148,13 @@ export async function setRoutineActive(id: string, isActive: boolean) {
 
 export async function deleteRoutine(id: string) {
   const db = await getDatabase();
+  const timestamp = nowIso();
 
-  await db.runAsync('DELETE FROM routines WHERE id = ?', [id]);
+  await db.runAsync('UPDATE routines SET is_active = 0, archived_at = COALESCE(archived_at, ?), updated_at = ? WHERE id = ?', [
+    timestamp,
+    timestamp,
+    id,
+  ]);
 }
 
 export async function countRoutines() {

@@ -1,13 +1,13 @@
 import { useCallback, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
-import { Database, HardDrive, ListChecks, ShieldCheck, Trash2, WifiOff } from 'lucide-react-native';
+import { Alert, Share, StyleSheet, Text, View } from 'react-native';
+import { Database, Download, HardDrive, ListChecks, ShieldCheck, Trash2, WifiOff } from 'lucide-react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Card } from '../../components/Card';
 import { MetricCard } from '../../components/MetricCard';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { Screen } from '../../components/Screen';
 import { SectionHeader } from '../../components/SectionHeader';
-import { clearDatabase, countLogs, getRoutines } from '../../database';
+import { clearDatabase, countLogs, exportDatabaseSnapshot, getAllRoutines, getRoutines } from '../../database';
 import { colors, radii, spacing, typography } from '../../theme';
 
 export function SettingsScreen() {
@@ -16,10 +16,10 @@ export function SettingsScreen() {
   const [totalLogs, setTotalLogs] = useState(0);
 
   const loadSettings = useCallback(async () => {
-    const [routines, logsCount] = await Promise.all([getRoutines(true), countLogs()]);
+    const [currentRoutines, allRoutines, logsCount] = await Promise.all([getRoutines(true), getAllRoutines(), countLogs()]);
 
-    setTotalRoutines(routines.length);
-    setActiveRoutines(routines.filter((routine) => routine.is_active === 1).length);
+    setTotalRoutines(allRoutines.length);
+    setActiveRoutines(currentRoutines.filter((routine) => routine.is_active === 1).length);
     setTotalLogs(logsCount);
   }, []);
 
@@ -30,7 +30,7 @@ export function SettingsScreen() {
   );
 
   function handleClearData() {
-    Alert.alert('Apagar dados locais', 'Isso remove rotinas e historico salvos neste aparelho.', [
+    Alert.alert('Apagar dados locais', 'Isso remove rotinas e historico salvos neste aparelho. Use apenas se quiser recomecar do zero.', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Apagar',
@@ -41,6 +41,18 @@ export function SettingsScreen() {
         },
       },
     ]);
+  }
+
+  async function handleExportBackup() {
+    try {
+      const snapshot = await exportDatabaseSnapshot();
+      await Share.share({
+        title: 'Backup Controle de Habitos',
+        message: snapshot,
+      });
+    } catch (err) {
+      Alert.alert('Backup nao gerado', err instanceof Error ? err.message : 'Nao foi possivel exportar os dados locais.');
+    }
   }
 
   return (
@@ -69,9 +81,14 @@ export function SettingsScreen() {
       </Card>
 
       <View style={styles.metricRow}>
-        <MetricCard label="Rotinas" value={`${totalRoutines}`} detail={`${activeRoutines} ativas`} icon={ListChecks} accent={colors.primary} />
+        <MetricCard label="Rotinas" value={`${totalRoutines}`} detail={`${activeRoutines} ativas atuais`} icon={ListChecks} accent={colors.primary} />
         <MetricCard label="Registros" value={`${totalLogs}`} detail="Logs salvos" icon={Database} accent={colors.success} />
       </View>
+
+      <Card style={styles.dataCard}>
+        <SectionHeader title="Backup local" subtitle="Exportacao JSON do estado atual" />
+        <PrimaryButton label="Exportar backup" icon={Download} onPress={handleExportBackup} />
+      </Card>
 
       <Card style={styles.dataCard}>
         <SectionHeader title="Dados locais" subtitle="Acoes aplicadas apenas neste aparelho" />

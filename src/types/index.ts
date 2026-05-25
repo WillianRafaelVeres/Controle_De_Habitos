@@ -11,6 +11,7 @@ export type Routine = {
   monthly_goal: number | null;
   monthly_goal_percent: number | null;
   is_active: number;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -18,9 +19,12 @@ export type Routine = {
 export type RoutineLog = {
   id: string;
   routine_id: string;
+  routine_name_snapshot: string;
   date: string;
   completed: number;
+  completed_at: string | null;
   created_at: string;
+  updated_at: string;
 };
 
 export type RoutineFormValues = {

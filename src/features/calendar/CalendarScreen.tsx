@@ -7,7 +7,7 @@ import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { Screen } from '../../components/Screen';
 import { SectionHeader } from '../../components/SectionHeader';
-import { getLogsForRange, getRoutines } from '../../database';
+import { getAllRoutines, getLogsForRange, setRoutineCompletion } from '../../database';
 import { colors, radii, spacing, typography } from '../../theme';
 import type { Routine, RoutineLog } from '../../types';
 import {
@@ -18,6 +18,7 @@ import {
   getCalendarGrid,
   getMonthRange,
   getMonthStart,
+  getRoutinesForDate,
   getWeekdayLabels,
   nextMonth,
   previousMonth,
@@ -33,9 +34,9 @@ export function CalendarScreen() {
 
   const loadCalendar = useCallback(async () => {
     const range = getMonthRange(monthDate);
-    const [activeRoutines, monthLogs] = await Promise.all([getRoutines(false), getLogsForRange(range.start, range.end)]);
+    const [allRoutines, monthLogs] = await Promise.all([getAllRoutines(), getLogsForRange(range.start, range.end)]);
 
-    setRoutines(activeRoutines);
+    setRoutines(allRoutines);
     setLogs(monthLogs);
   }, [monthDate]);
 
@@ -46,27 +47,28 @@ export function CalendarScreen() {
   );
 
   const cells = useMemo(() => getCalendarGrid(monthDate), [monthDate]);
-  const completedIdsForSelectedDate = useMemo(
-    () =>
-      new Set(
-        logs
-          .filter((log) => log.date === selectedDate && log.completed === 1)
-          .map((log) => log.routine_id),
-      ),
-    [logs, selectedDate],
-  );
+  const logsForSelectedDate = useMemo(() => logs.filter((log) => log.date === selectedDate), [logs, selectedDate]);
   const selectedProgress = useMemo(
     () => calculateDailyPercentage(selectedDate, routines, logs),
     [logs, routines, selectedDate],
   );
-  const selectedCompleted = useMemo(
-    () => routines.filter((routine) => completedIdsForSelectedDate.has(routine.id)),
-    [completedIdsForSelectedDate, routines],
-  );
-  const selectedPending = useMemo(
-    () => routines.filter((routine) => !completedIdsForSelectedDate.has(routine.id)),
-    [completedIdsForSelectedDate, routines],
-  );
+  const selectedItems = useMemo(() => {
+    const logsByRoutineId = new Map(logsForSelectedDate.map((log) => [log.routine_id, log]));
+
+    return getRoutinesForDate(selectedDate, routines, logsForSelectedDate).map((routine) => {
+      const log = logsByRoutineId.get(routine.id);
+      const checked = log?.completed === 1;
+
+      return {
+        routine,
+        checked,
+        displayName: checked && log?.routine_name_snapshot ? log.routine_name_snapshot : routine.name,
+      };
+    });
+  }, [logsForSelectedDate, routines, selectedDate]);
+  const selectedCompleted = useMemo(() => selectedItems.filter((item) => item.checked), [selectedItems]);
+  const selectedPending = useMemo(() => selectedItems.filter((item) => !item.checked), [selectedItems]);
+  const selectedIsFuture = selectedDate > todayKey();
 
   function changeMonth(nextDate: Date) {
     const firstDay = getMonthStart(nextDate);
@@ -78,6 +80,15 @@ export function CalendarScreen() {
     const today = new Date();
     setMonthDate(getMonthStart(today));
     setSelectedDate(todayKey());
+  }
+
+  async function handleToggleRoutine(routine: Routine, checked: boolean) {
+    if (selectedIsFuture) {
+      return;
+    }
+
+    await setRoutineCompletion(routine.id, selectedDate, !checked);
+    await loadCalendar();
   }
 
   return (
@@ -127,19 +138,31 @@ export function CalendarScreen() {
 
       <Card style={styles.detailCard}>
         <SectionHeader title={formatReadableDate(selectedDate)} subtitle={`${selectedProgress.percentage}% concluido`} />
-        {routines.length === 0 ? (
-          <EmptyState icon={CalendarDays} title="Nenhuma rotina ativa" subtitle="Ative ou cadastre rotinas para acompanhar o calendario." />
+        {selectedItems.length === 0 ? (
+          <EmptyState icon={CalendarDays} title="Nenhuma rotina neste dia" subtitle="Os registros aparecem conforme as rotinas existem no periodo selecionado." />
         ) : (
           <>
             <View style={styles.detailSummary}>
               <Text style={styles.detailPercent}>{selectedProgress.percentage}%</Text>
               <Text style={styles.detailText}>
-                {selectedProgress.completed} de {selectedProgress.total} rotinas concluidas
+                {selectedProgress.completed} de {selectedProgress.total} metas concluidas
               </Text>
             </View>
 
-            <RoutineSection title="Concluidas" emptyText="Nenhuma rotina concluida neste dia." routines={selectedCompleted} done />
-            <RoutineSection title="Pendentes" emptyText="Nada pendente neste dia." routines={selectedPending} />
+            <RoutineSection
+              title="Concluidas"
+              emptyText="Nenhuma rotina concluida neste dia."
+              items={selectedCompleted}
+              disabled={selectedIsFuture}
+              onToggle={handleToggleRoutine}
+            />
+            <RoutineSection
+              title="Pendentes"
+              emptyText="Nada pendente neste dia."
+              items={selectedPending}
+              disabled={selectedIsFuture}
+              onToggle={handleToggleRoutine}
+            />
           </>
         )}
       </Card>
@@ -190,23 +213,30 @@ function IconButton({ onPress, icon: Icon }: { onPress: () => void; icon: typeof
 function RoutineSection({
   title,
   emptyText,
-  routines,
-  done = false,
+  items,
+  disabled,
+  onToggle,
 }: {
   title: string;
   emptyText: string;
-  routines: Routine[];
-  done?: boolean;
+  items: Array<{ routine: Routine; checked: boolean; displayName: string }>;
+  disabled: boolean;
+  onToggle: (routine: Routine, checked: boolean) => void;
 }) {
   return (
     <View style={styles.routineSection}>
       <Text style={styles.sectionTitle}>{title}</Text>
-      {routines.length === 0 ? (
+      {items.length === 0 ? (
         <Text style={styles.emptyText}>{emptyText}</Text>
       ) : (
         <View style={styles.doneList}>
-          {routines.map((routine) => (
-            <CalendarRoutineRow key={routine.id} routine={routine} done={done} />
+          {items.map((item) => (
+            <CalendarRoutineRow
+              key={item.routine.id}
+              item={item}
+              disabled={disabled}
+              onToggle={() => onToggle(item.routine, item.checked)}
+            />
           ))}
         </View>
       )}
@@ -214,25 +244,34 @@ function RoutineSection({
   );
 }
 
-function CalendarRoutineRow({ routine, done }: { routine: Routine; done: boolean }) {
+function CalendarRoutineRow({
+  item,
+  disabled,
+  onToggle,
+}: {
+  item: { routine: Routine; checked: boolean; displayName: string };
+  disabled: boolean;
+  onToggle: () => void;
+}) {
+  const { routine, checked, displayName } = item;
   const accent = getRoutineColor(routine.color);
   const Icon = getRoutineIcon(routine.icon);
 
   return (
-    <View style={styles.doneRow}>
+    <Pressable onPress={onToggle} disabled={disabled} style={({ pressed }) => [styles.doneRow, checked && styles.doneRowChecked, disabled && styles.disabledRow, pressed && styles.pressed]}>
       <View style={[styles.doneIcon, { backgroundColor: `${accent}20` }]}>
         <Icon color={accent} size={18} strokeWidth={2.4} />
       </View>
       <View style={styles.doneCopy}>
         <Text style={styles.doneName} numberOfLines={1}>
-          {routine.name}
+          {displayName}
         </Text>
         <Text style={styles.doneMeta} numberOfLines={1}>
           {routine.category || 'Rotina diaria'}
         </Text>
       </View>
-      {done ? <CheckCircle2 color={colors.success} size={20} strokeWidth={2.4} /> : <CircleMinus color={colors.textSubtle} size={20} strokeWidth={2.4} />}
-    </View>
+      {checked ? <CheckCircle2 color={colors.success} size={20} strokeWidth={2.4} /> : <CircleMinus color={colors.textSubtle} size={20} strokeWidth={2.4} />}
+    </Pressable>
   );
 }
 
@@ -402,6 +441,13 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     padding: spacing.md,
     backgroundColor: 'rgba(148, 163, 184, 0.08)',
+  },
+  doneRowChecked: {
+    borderColor: 'rgba(49, 208, 138, 0.28)',
+    borderWidth: 1,
+  },
+  disabledRow: {
+    opacity: 0.56,
   },
   doneIcon: {
     width: 38,
