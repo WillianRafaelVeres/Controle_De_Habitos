@@ -1,29 +1,29 @@
 export const colors = {
-  background: '#060817',
-  backgroundSoft: '#0B1026',
-  surface: 'rgba(17, 24, 52, 0.82)',
-  surfaceStrong: '#141B3D',
-  surfaceMuted: '#0E1530',
-  border: 'rgba(148, 163, 184, 0.18)',
-  borderStrong: 'rgba(125, 92, 255, 0.44)',
-  text: '#F8FAFC',
-  textMuted: '#AAB4D4',
-  textSubtle: '#7782A8',
-  primary: '#7C5CFF',
-  primaryDark: '#4B35B6',
-  secondary: '#26D9FF',
-  accent: '#D946EF',
-  success: '#31D08A',
-  warning: '#F5B84B',
-  danger: '#FF5D73',
+  background: '#0C0D10',
+  backgroundSoft: '#121419',
+  surface: 'rgba(22, 24, 29, 0.92)',
+  surfaceStrong: '#1B1E24',
+  surfaceMuted: '#14161B',
+  border: 'rgba(161, 161, 170, 0.16)',
+  borderStrong: 'rgba(59, 130, 246, 0.36)',
+  text: '#F4F4F5',
+  textMuted: '#A1A1AA',
+  textSubtle: '#71717A',
+  primary: '#3B82F6',
+  primaryDark: '#1D4ED8',
+  secondary: '#14B8A6',
+  accent: '#8B5CF6',
+  success: '#22C55E',
+  warning: '#F59E0B',
+  danger: '#EF4444',
   white: '#FFFFFF',
   black: '#000000',
 };
 
 export const gradients = {
-  screen: ['#050714', '#0A1030', '#1B1042'] as const,
-  card: ['rgba(124, 92, 255, 0.22)', 'rgba(38, 217, 255, 0.08)'] as const,
-  primary: ['#7C5CFF', '#26D9FF'] as const,
+  screen: ['#0C0D10', '#0C0D10', '#121419'] as const,
+  card: ['rgba(59, 130, 246, 0.12)', 'rgba(20, 184, 166, 0.06)'] as const,
+  primary: ['#2563EB', '#2563EB'] as const,
 };
 
 export const spacing = {
@@ -36,10 +36,10 @@ export const spacing = {
 };
 
 export const radii = {
-  sm: 8,
-  md: 12,
-  lg: 18,
-  xl: 24,
+  sm: 6,
+  md: 8,
+  lg: 12,
+  xl: 16,
 };
 
 export const typography = {
@@ -53,10 +53,10 @@ export const typography = {
 
 export const shadows = {
   card: {
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
-    elevation: 8,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 2,
   },
 };

@@ -264,3 +264,35 @@ export function buildLastDaysCompletionTotals(logs: RoutineLog[], amount: number
     value: logs.filter((log) => log.date === day.key && log.completed === 1).length,
   }));
 }
+
+export function buildWeekdayCompletionRates(routines: Routine[], logs: RoutineLog[], startDate: string, endDate: string) {
+  const labels = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'];
+  const weekdayOrder = [1, 2, 3, 4, 5, 6, 0];
+  const totals = weekdayOrder.map((weekday, index) => ({
+    weekday,
+    label: labels[index],
+    completed: 0,
+    planned: 0,
+    percentage: 0,
+  }));
+  const totalsByWeekday = new Map(totals.map((item) => [item.weekday, item]));
+  let cursor = parseDateKey(startDate);
+
+  while (dateToKey(cursor) <= endDate) {
+    const key = dateToKey(cursor);
+    const weekday = cursor.getDay();
+    const item = totalsByWeekday.get(weekday);
+
+    if (item) {
+      item.planned += countExpectedRoutinesForDate(key, routines);
+      item.completed += logs.filter((log) => log.date === key && log.completed === 1).length;
+    }
+
+    cursor = addDays(cursor, 1);
+  }
+
+  return totals.map((item) => ({
+    ...item,
+    percentage: item.planned > 0 ? Math.min(100, Math.round((item.completed / item.planned) * 100)) : 0,
+  }));
+}

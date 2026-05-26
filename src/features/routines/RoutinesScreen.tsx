@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
-import { Edit3, Plus, Power, Trash2 } from 'lucide-react-native';
+import { Archive, Edit3, Plus } from 'lucide-react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
@@ -83,10 +83,10 @@ export function RoutinesScreen() {
     <Screen contentStyle={styles.screen}>
       <View style={styles.header}>
         <Text style={styles.title}>Rotinas</Text>
-        <PrimaryButton label="Nova" icon={Plus} onPress={openCreate} style={styles.addButton} />
+        <PrimaryButton label="Nova rotina" icon={Plus} onPress={openCreate} style={styles.addButton} />
       </View>
 
-      <SectionHeader title="Cadastro" subtitle={`${routines.length} rotinas atuais no banco local`} />
+      <SectionHeader title="Rotinas atuais" subtitle={`${routines.length} cadastradas`} />
 
       {routines.length === 0 ? (
         <EmptyState icon={Plus} title="Comece por uma rotina" subtitle="Cadastre uma rotina diaria para liberar progresso, calendario e estatisticas." />
@@ -164,16 +164,12 @@ function RoutineCard({
 
       <View style={styles.actions}>
         <Pressable onPress={onEdit} style={styles.actionButton}>
-          <Edit3 color={colors.text} size={18} />
+          <Edit3 color={colors.textMuted} size={17} />
           <Text style={styles.actionText}>Editar</Text>
         </Pressable>
-        <Pressable onPress={onToggleActive} style={styles.actionButton}>
-          <Power color={isActive ? colors.success : colors.textSubtle} size={18} />
-          <Text style={styles.actionText}>{isActive ? 'Ativa' : 'Inativa'}</Text>
-        </Pressable>
         <Pressable onPress={onDelete} style={[styles.actionButton, styles.deleteButton]}>
-          <Trash2 color={colors.danger} size={18} />
-          <Text style={[styles.actionText, styles.deleteText]}>Excluir</Text>
+          <Archive color={colors.danger} size={17} />
+          <Text style={[styles.actionText, styles.deleteText]}>Arquivar</Text>
         </Pressable>
       </View>
     </Card>
@@ -197,13 +193,13 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   addButton: {
-    minWidth: 112,
+    minWidth: 136,
   },
   list: {
     gap: spacing.md,
   },
   routineCard: {
-    gap: spacing.lg,
+    gap: spacing.md,
   },
   routineInactive: {
     opacity: 0.68,
@@ -214,8 +210,8 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   iconWrap: {
-    width: 50,
-    height: 50,
+    width: 38,
+    height: 38,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radii.lg,
@@ -226,13 +222,13 @@ const styles = StyleSheet.create({
   },
   routineName: {
     color: colors.text,
-    fontSize: typography.h3,
-    fontWeight: '900',
+    fontSize: typography.body,
+    fontWeight: '800',
   },
   routineMeta: {
-    color: colors.secondary,
+    color: colors.textMuted,
     fontSize: typography.small,
-    fontWeight: '700',
+    fontWeight: '600',
     marginTop: spacing.xs,
   },
   description: {
@@ -247,13 +243,13 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
-    minHeight: 42,
+    minHeight: 38,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: spacing.sm,
     borderRadius: radii.md,
-    backgroundColor: 'rgba(148, 163, 184, 0.1)',
+    backgroundColor: 'rgba(161, 161, 170, 0.08)',
   },
   actionText: {
     color: colors.text,
@@ -261,7 +257,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   deleteButton: {
-    backgroundColor: 'rgba(255, 93, 115, 0.12)',
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
   },
   deleteText: {
     color: colors.danger,

@@ -1,4 +1,4 @@
-import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import type { DailyProgressPoint } from '../types';
 import { colors, radii, spacing, typography } from '../theme';
@@ -9,43 +9,43 @@ type MonthlyLineChartProps = {
 
 export function MonthlyLineChart({ data }: MonthlyLineChartProps) {
   const { width } = useWindowDimensions();
-  const chartWidth = Math.max(width - 64, data.length * 30);
+  const chartWidth = Math.max(260, width - 64);
 
   if (data.length === 0) {
     return <Text style={styles.empty}>Sem dados para este mes.</Text>;
   }
 
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-      <View style={styles.chartShell}>
-        <LineChart
-          data={{
-            labels: data.map((item) => (item.day === 1 || item.day % 5 === 0 ? String(item.day) : '')),
-            datasets: [{ data: data.map((item) => item.percentage) }],
-          }}
-          width={chartWidth}
-          height={214}
-          fromZero
-          segments={4}
-          yAxisSuffix="%"
-          bezier
-          chartConfig={chartConfig}
-          style={styles.chart}
-        />
-      </View>
-    </ScrollView>
+    <View style={styles.chartShell}>
+      <LineChart
+        data={{
+          labels: data.map((item) => (item.day === 1 || item.day % 7 === 0 ? String(item.day) : '')),
+          datasets: [{ data: data.map((item) => item.percentage) }],
+        }}
+        width={chartWidth}
+        height={166}
+        fromZero
+        segments={4}
+        yAxisSuffix="%"
+        bezier
+        withDots={false}
+        withShadow={false}
+        chartConfig={chartConfig}
+        style={styles.chart}
+      />
+    </View>
   );
 }
 
 const chartConfig = {
-  backgroundGradientFrom: colors.surfaceStrong,
-  backgroundGradientTo: colors.surfaceMuted,
+  backgroundGradientFrom: colors.surface,
+  backgroundGradientTo: colors.surface,
   decimalPlaces: 0,
   color: (opacity = 1) => `rgba(38, 217, 255, ${opacity})`,
   labelColor: (opacity = 1) => `rgba(170, 180, 212, ${opacity})`,
   propsForDots: {
-    r: '4',
-    strokeWidth: '2',
+    r: '3',
+    strokeWidth: '1',
     stroke: colors.secondary,
   },
   propsForBackgroundLines: {
@@ -60,7 +60,7 @@ const styles = StyleSheet.create({
   },
   chart: {
     borderRadius: radii.lg,
-    paddingRight: spacing.lg,
+    paddingRight: spacing.sm,
   },
   empty: {
     color: colors.textMuted,

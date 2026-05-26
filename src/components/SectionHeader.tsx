@@ -26,7 +26,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: spacing.md,
-    marginBottom: spacing.md,
   },
   copy: {
     flex: 1,

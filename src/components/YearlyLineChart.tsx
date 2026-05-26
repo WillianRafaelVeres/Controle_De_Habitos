@@ -9,7 +9,7 @@ type YearlyLineChartProps = {
 
 export function YearlyLineChart({ data }: YearlyLineChartProps) {
   const { width } = useWindowDimensions();
-  const chartWidth = Math.max(width - 64, 340);
+  const chartWidth = Math.max(260, width - 64);
 
   if (data.length === 0) {
     return <Text style={styles.empty}>Sem dados para este ano.</Text>;
@@ -23,11 +23,13 @@ export function YearlyLineChart({ data }: YearlyLineChartProps) {
           datasets: [{ data: data.map((item) => item.percentage) }],
         }}
         width={chartWidth}
-        height={214}
+        height={166}
         fromZero
         segments={4}
         yAxisSuffix="%"
         bezier
+        withDots={false}
+        withShadow={false}
         chartConfig={chartConfig}
         style={styles.chart}
       />
@@ -36,14 +38,14 @@ export function YearlyLineChart({ data }: YearlyLineChartProps) {
 }
 
 const chartConfig = {
-  backgroundGradientFrom: colors.surfaceStrong,
-  backgroundGradientTo: colors.surfaceMuted,
+  backgroundGradientFrom: colors.surface,
+  backgroundGradientTo: colors.surface,
   decimalPlaces: 0,
   color: (opacity = 1) => `rgba(124, 92, 255, ${opacity})`,
   labelColor: (opacity = 1) => `rgba(170, 180, 212, ${opacity})`,
   propsForDots: {
-    r: '4',
-    strokeWidth: '2',
+    r: '3',
+    strokeWidth: '1',
     stroke: colors.primary,
   },
   propsForBackgroundLines: {
@@ -58,7 +60,7 @@ const styles = StyleSheet.create({
   },
   chart: {
     borderRadius: radii.lg,
-    paddingRight: spacing.lg,
+    paddingRight: spacing.sm,
   },
   empty: {
     color: colors.textMuted,

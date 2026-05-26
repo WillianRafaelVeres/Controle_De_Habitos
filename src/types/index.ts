@@ -75,7 +75,6 @@ export type MonthStats = {
 export type RootTabParamList = {
   Dashboard: undefined;
   Routines: undefined;
-  Stats: undefined;
   Calendar: undefined;
-  Settings: undefined;
+  Stats: undefined;
 };

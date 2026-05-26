@@ -124,15 +124,30 @@ export function CalendarScreen() {
 
             const progress = calculateDailyPercentage(cell.key, routines, logs);
             const selected = cell.key === selectedDate;
+            const isFuture = cell.key > todayKey();
+            const isPast = cell.key < todayKey();
 
             return (
               <View key={cell.key} style={styles.daySlot}>
                 <Pressable onPress={() => setSelectedDate(cell.key)} style={[styles.dayButton, selected && styles.daySelected]}>
-                  <DayProgressCircle day={cell.day} percentage={progress.percentage} isToday={cell.isToday} />
+                  <DayProgressCircle
+                    day={cell.day}
+                    percentage={progress.percentage}
+                    isToday={cell.isToday}
+                    isFuture={isFuture}
+                    isPast={isPast}
+                    hasPlanned={progress.total > 0}
+                  />
                 </Pressable>
               </View>
             );
           })}
+        </View>
+
+        <View style={styles.legend}>
+          <LegendItem color={colors.danger} label="Baixo" />
+          <LegendItem color="#FACC15" label="Parcial" />
+          <LegendItem color={colors.success} label="Completo" />
         </View>
       </Card>
 
@@ -170,34 +185,97 @@ export function CalendarScreen() {
   );
 }
 
-function DayProgressCircle({ day, percentage, isToday }: { day: number; percentage: number; isToday: boolean }) {
-  const size = 46;
-  const strokeWidth = 4;
+function DayProgressCircle({
+  day,
+  percentage,
+  isToday,
+  isFuture,
+  isPast,
+  hasPlanned,
+}: {
+  day: number;
+  percentage: number;
+  isToday: boolean;
+  isFuture: boolean;
+  isPast: boolean;
+  hasPlanned: boolean;
+}) {
+  const size = 42;
+  const strokeWidth = 3.5;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (circumference * percentage) / 100;
-  const accent = percentage >= 100 ? colors.success : percentage > 0 ? colors.secondary : colors.textSubtle;
+  const accent = getCalendarProgressColor(percentage, isFuture, isPast, hasPlanned);
+  const trackColor = isPast && hasPlanned && percentage === 0 ? 'rgba(239, 68, 68, 0.42)' : 'rgba(161, 161, 170, 0.16)';
+  const showProgress = hasPlanned && !isFuture && percentage > 0;
 
   return (
     <View style={styles.circleShell}>
       <Svg width={size} height={size} style={styles.progressRing}>
-        <SvgCircle cx={size / 2} cy={size / 2} r={radius} stroke="rgba(148, 163, 184, 0.16)" strokeWidth={strokeWidth} fill="none" />
-        <SvgCircle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke={accent}
-          strokeWidth={strokeWidth}
-          fill="none"
-          strokeLinecap="round"
-          strokeDasharray={`${circumference} ${circumference}`}
-          strokeDashoffset={strokeDashoffset}
-          rotation="-90"
-          origin={`${size / 2}, ${size / 2}`}
-        />
+        <SvgCircle cx={size / 2} cy={size / 2} r={radius} stroke={trackColor} strokeWidth={strokeWidth} fill="none" />
+        {showProgress ? (
+          <SvgCircle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke={accent}
+            strokeWidth={strokeWidth}
+            fill="none"
+            strokeLinecap="round"
+            strokeDasharray={`${circumference} ${circumference}`}
+            strokeDashoffset={strokeDashoffset}
+            rotation="-90"
+            origin={`${size / 2}, ${size / 2}`}
+          />
+        ) : null}
       </Svg>
-      <Text style={[styles.dayText, isToday && styles.todayDayText]}>{day}</Text>
-      <Text style={[styles.percentText, { color: accent }]}>{percentage}%</Text>
+      <Text style={[styles.dayText, { color: accent }, isToday && styles.todayDayText]}>{day}</Text>
+    </View>
+  );
+}
+
+function getCalendarProgressColor(percentage: number, isFuture: boolean, isPast: boolean, hasPlanned: boolean) {
+  if (isFuture || !hasPlanned) {
+    return colors.textSubtle;
+  }
+
+  if (percentage === 0) {
+    return isPast ? colors.danger : colors.textMuted;
+  }
+
+  return getCompletionGradientColor(percentage);
+}
+
+function getCompletionGradientColor(percentage: number) {
+  const clamped = Math.max(0, Math.min(100, percentage));
+  const red = { r: 239, g: 68, b: 68 };
+  const yellow = { r: 250, g: 204, b: 21 };
+  const green = { r: 34, g: 197, b: 94 };
+
+  if (clamped <= 50) {
+    return interpolateRgb(red, yellow, clamped / 50);
+  }
+
+  return interpolateRgb(yellow, green, (clamped - 50) / 50);
+}
+
+function interpolateRgb(
+  start: { r: number; g: number; b: number },
+  end: { r: number; g: number; b: number },
+  amount: number,
+) {
+  const r = Math.round(start.r + (end.r - start.r) * amount);
+  const g = Math.round(start.g + (end.g - start.g) * amount);
+  const b = Math.round(start.b + (end.b - start.b) * amount);
+
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+function LegendItem({ color, label }: { color: string; label: string }) {
+  return (
+    <View style={styles.legendItem}>
+      <View style={[styles.legendDot, { backgroundColor: color }]} />
+      <Text style={styles.legendText}>{label}</Text>
     </View>
   );
 }
@@ -362,55 +440,71 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: radii.md,
+    borderRadius: radii.sm,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: 'rgba(8, 13, 31, 0.55)',
+    backgroundColor: 'rgba(24, 24, 27, 0.58)',
   },
   daySelected: {
-    borderColor: colors.secondary,
+    borderColor: colors.textMuted,
     borderWidth: 2,
   },
   circleShell: {
     alignItems: 'center',
-    height: 52,
+    height: 46,
     justifyContent: 'center',
-    width: 52,
+    width: 46,
   },
   progressRing: {
     position: 'absolute',
   },
   dayText: {
-    color: colors.text,
-    fontSize: typography.tiny,
-    fontWeight: '900',
-    lineHeight: 13,
+    fontSize: typography.small,
+    fontWeight: '800',
+    lineHeight: 16,
   },
   todayDayText: {
-    color: colors.secondary,
+    textDecorationLine: 'underline',
   },
-  percentText: {
-    fontSize: 10,
-    fontWeight: '900',
-    lineHeight: 12,
+  legend: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.md,
+    paddingTop: spacing.md,
+  },
+  legendItem: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  legendDot: {
+    borderRadius: 4,
+    height: 8,
+    width: 8,
+  },
+  legendText: {
+    color: colors.textMuted,
+    fontSize: typography.tiny,
+    fontWeight: '700',
   },
   detailCard: {
     gap: spacing.md,
   },
   detailSummary: {
     alignItems: 'center',
-    backgroundColor: 'rgba(38, 217, 255, 0.1)',
-    borderColor: 'rgba(38, 217, 255, 0.24)',
-    borderRadius: radii.lg,
+    backgroundColor: 'rgba(161, 161, 170, 0.08)',
+    borderColor: colors.border,
+    borderRadius: radii.md,
     borderWidth: 1,
     flexDirection: 'row',
     gap: spacing.md,
     padding: spacing.lg,
   },
   detailPercent: {
-    color: colors.secondary,
-    fontSize: 34,
-    fontWeight: '900',
+    color: colors.text,
+    fontSize: 30,
+    fontWeight: '800',
   },
   detailText: {
     color: colors.text,
@@ -440,7 +534,7 @@ const styles = StyleSheet.create({
     minHeight: 58,
     borderRadius: radii.md,
     padding: spacing.md,
-    backgroundColor: 'rgba(148, 163, 184, 0.08)',
+    backgroundColor: 'rgba(161, 161, 170, 0.08)',
   },
   doneRowChecked: {
     borderColor: 'rgba(49, 208, 138, 0.28)',

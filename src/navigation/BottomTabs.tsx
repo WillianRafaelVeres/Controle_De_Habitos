@@ -1,10 +1,9 @@
-import { BarChart3, CalendarDays, Home, ListChecks, Settings } from 'lucide-react-native';
+import { BarChart3, CalendarDays, Home, ListChecks } from 'lucide-react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import type { RootTabParamList } from '../types';
 import { CalendarScreen } from '../features/calendar/CalendarScreen';
 import { DashboardScreen } from '../features/dashboard/DashboardScreen';
 import { RoutinesScreen } from '../features/routines/RoutinesScreen';
-import { SettingsScreen } from '../features/settings/SettingsScreen';
 import { StatsScreen } from '../features/stats/StatsScreen';
 import { colors, radii, spacing } from '../theme';
 
@@ -25,7 +24,7 @@ export function BottomTabs() {
           height: 72,
           paddingTop: spacing.sm,
           paddingBottom: spacing.md,
-          backgroundColor: 'rgba(8, 13, 31, 0.94)',
+          backgroundColor: 'rgba(18, 20, 25, 0.96)',
           borderTopWidth: 0,
           borderRadius: radii.xl,
           borderWidth: 1,
@@ -55,14 +54,6 @@ export function BottomTabs() {
         }}
       />
       <Tab.Screen
-        name="Stats"
-        component={StatsScreen}
-        options={{
-          title: 'Estatisticas',
-          tabBarIcon: ({ color, size }) => <BarChart3 color={color} size={size} />,
-        }}
-      />
-      <Tab.Screen
         name="Calendar"
         component={CalendarScreen}
         options={{
@@ -71,11 +62,11 @@ export function BottomTabs() {
         }}
       />
       <Tab.Screen
-        name="Settings"
-        component={SettingsScreen}
+        name="Stats"
+        component={StatsScreen}
         options={{
-          title: 'Ajustes',
-          tabBarIcon: ({ color, size }) => <Settings color={color} size={size} />,
+          title: 'Estatisticas',
+          tabBarIcon: ({ color, size }) => <BarChart3 color={color} size={size} />,
         }}
       />
     </Tab.Navigator>
