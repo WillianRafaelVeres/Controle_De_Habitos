@@ -8,10 +8,10 @@ import { EmptyState } from '../../components/EmptyState';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { Screen } from '../../components/Screen';
 import { SectionHeader } from '../../components/SectionHeader';
-import { getActivitiesWithSchedules, updateActivity } from '../../database';
+import { createCategory, getActivitiesWithSchedules, getCategories, updateActivity } from '../../database';
 import { colors, radii, spacing, typography } from '../../theme';
-import type { ActivityFormValues, ActivityWithSchedules, RootTabParamList, WeeklySchedule } from '../../types';
-import { getRoutineColor } from '../../utils/routineVisuals';
+import type { ActivityFormValues, ActivityWithSchedules, Category, CategoryFormValues, RootTabParamList, WeeklySchedule } from '../../types';
+import { getActivityColor } from '../../utils/routineVisuals';
 import { RoutineFormModal } from '../routines/RoutineFormModal';
 
 const WEEKDAYS = [
@@ -32,17 +32,27 @@ type QtsItem = {
 export function QtsScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
   const [activities, setActivities] = useState<ActivityWithSchedules[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [editingActivity, setEditingActivity] = useState<ActivityWithSchedules | null>(null);
   const [saving, setSaving] = useState(false);
 
   const loadQts = useCallback(async () => {
-    setActivities(await getActivitiesWithSchedules(false));
+    const [activityRows, categoryRows] = await Promise.all([getActivitiesWithSchedules(false), getCategories(false)]);
+
+    setActivities(activityRows);
+    setCategories(categoryRows);
   }, []);
 
   useFocusEffect(
     useCallback(() => {
       loadQts();
     }, [loadQts]),
+  );
+
+  const filteredActivities = useMemo(
+    () => (selectedCategoryId ? activities.filter((activity) => activity.category_id === selectedCategoryId) : activities),
+    [activities, selectedCategoryId],
   );
 
   const scheduledByDay = useMemo(() => {
@@ -52,7 +62,7 @@ export function QtsScreen() {
       map.set(day.value, []);
     }
 
-    for (const activity of activities) {
+    for (const activity of filteredActivities) {
       for (const schedule of activity.schedules) {
         if (schedule.has_fixed_time === 1) {
           map.get(schedule.weekday)?.push({ activity, schedule });
@@ -65,7 +75,7 @@ export function QtsScreen() {
     }
 
     return map;
-  }, [activities]);
+  }, [filteredActivities]);
 
   const flexibleByDay = useMemo(() => {
     const map = new Map<number, QtsItem[]>();
@@ -74,7 +84,7 @@ export function QtsScreen() {
       map.set(day.value, []);
     }
 
-    for (const activity of activities) {
+    for (const activity of filteredActivities) {
       for (const schedule of activity.schedules) {
         if (schedule.has_fixed_time !== 1) {
           map.get(schedule.weekday)?.push({ activity, schedule });
@@ -87,9 +97,9 @@ export function QtsScreen() {
     }
 
     return map;
-  }, [activities]);
+  }, [filteredActivities]);
 
-  const hasAnyActivity = activities.some((activity) => activity.schedules.length > 0);
+  const hasAnyActivity = filteredActivities.some((activity) => activity.schedules.length > 0);
 
   function openEdit(activity: ActivityWithSchedules) {
     setEditingActivity(activity);
@@ -111,6 +121,13 @@ export function QtsScreen() {
     }
   }
 
+  async function handleCreateCategory(values: CategoryFormValues) {
+    const category = await createCategory(values);
+    await loadQts();
+
+    return category;
+  }
+
   return (
     <Screen contentStyle={styles.screen}>
       <View style={styles.header}>
@@ -120,6 +137,19 @@ export function QtsScreen() {
         </View>
         <PrimaryButton label="Nova" icon={Plus} onPress={() => navigation.navigate('Routines')} style={styles.addButton} />
       </View>
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
+        <FilterPill label="Todas" selected={!selectedCategoryId} onPress={() => setSelectedCategoryId(null)} />
+        {categories.map((category) => (
+          <FilterPill
+            key={category.id}
+            label={category.name}
+            color={category.color}
+            selected={selectedCategoryId === category.id}
+            onPress={() => setSelectedCategoryId(category.id)}
+          />
+        ))}
+      </ScrollView>
 
       {!hasAnyActivity ? (
         <EmptyState icon={CalendarRange} title="QTS vazio" subtitle="Crie rotinas com dias da semana para montar seu quadro." />
@@ -159,8 +189,10 @@ export function QtsScreen() {
       <RoutineFormModal
         visible={Boolean(editingActivity)}
         routine={editingActivity}
+        categories={categories}
         saving={saving}
         onClose={() => setEditingActivity(null)}
+        onCreateCategory={handleCreateCategory}
         onSubmit={handleSave}
       />
     </Screen>
@@ -185,7 +217,7 @@ function DayColumn({ day, items, onEdit }: { day: string; items: QtsItem[]; onEd
 }
 
 function QtsBlock({ item, onPress }: { item: QtsItem; onPress: () => void }) {
-  const accent = getRoutineColor(item.activity.color);
+  const accent = getActivityColor(item.activity);
 
   return (
     <Pressable onPress={onPress} style={[styles.qtsBlock, { borderLeftColor: accent }]}>
@@ -198,9 +230,9 @@ function QtsBlock({ item, onPress }: { item: QtsItem; onPress: () => void }) {
       <Text style={styles.blockName} numberOfLines={2}>
         {item.activity.name}
       </Text>
-      {item.activity.category ? (
+      {item.activity.category_name || item.activity.category ? (
         <Text style={styles.blockCategory} numberOfLines={1}>
-          {item.activity.category}
+          {item.activity.category_name ?? item.activity.category}
         </Text>
       ) : null}
     </Pressable>
@@ -208,7 +240,7 @@ function QtsBlock({ item, onPress }: { item: QtsItem; onPress: () => void }) {
 }
 
 function QtsPill({ item, onPress }: { item: QtsItem; onPress: () => void }) {
-  const accent = getRoutineColor(item.activity.color);
+  const accent = getActivityColor(item.activity);
 
   return (
     <Pressable onPress={onPress} style={[styles.flexPill, { borderColor: `${accent}77`, backgroundColor: `${accent}14` }]}>
@@ -216,6 +248,31 @@ function QtsPill({ item, onPress }: { item: QtsItem; onPress: () => void }) {
         {item.activity.name}
       </Text>
       {item.schedule.reminder_time ? <Text style={styles.flexReminder}>{item.schedule.reminder_time}</Text> : null}
+    </Pressable>
+  );
+}
+
+function FilterPill({
+  label,
+  color,
+  selected,
+  onPress,
+}: {
+  label: string;
+  color?: string | null;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const accent = color ?? colors.secondary;
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.filterPill, selected && { borderColor: accent, backgroundColor: `${accent}18` }]}
+    >
+      <Text style={[styles.filterText, selected && styles.filterTextActive]} numberOfLines={1}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -247,6 +304,27 @@ const styles = StyleSheet.create({
   },
   addButton: {
     minWidth: 98,
+  },
+  filterScroll: {
+    gap: spacing.sm,
+    paddingRight: spacing.lg,
+  },
+  filterPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: 'rgba(161, 161, 170, 0.06)',
+    maxWidth: 150,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  filterText: {
+    color: colors.textMuted,
+    fontSize: typography.small,
+    fontWeight: '800',
+  },
+  filterTextActive: {
+    color: colors.text,
   },
   weekScroll: {
     gap: spacing.md,

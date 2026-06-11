@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Check, ChevronLeft, ChevronRight, Circle, Clock3, PlusCircle } from 'lucide-react-native';
+import { Check, ChevronLeft, ChevronRight, Circle, PlusCircle } from 'lucide-react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
@@ -11,7 +11,7 @@ import { getPlannedItemsForDate, setPlannedItemCompleted } from '../../database'
 import { colors, radii, spacing, typography } from '../../theme';
 import type { PlannedActivityItem } from '../../types';
 import { addDays, dateToKey, formatReadableDate, parseDateKey, todayKey } from '../../utils/date';
-import { getRoutineColor } from '../../utils/routineVisuals';
+import { getActivityColor, getActivityIcon } from '../../utils/routineVisuals';
 
 export function DashboardScreen() {
   const [selectedDate, setSelectedDate] = useState(todayKey());
@@ -121,7 +121,8 @@ function ActivitySection({
 }
 
 function ActivityRow({ item, disabled, onToggle }: { item: PlannedActivityItem; disabled: boolean; onToggle: () => void }) {
-  const accent = getRoutineColor(item.activity.color);
+  const accent = getActivityColor(item.activity);
+  const Icon = getActivityIcon(item.activity);
   const done = item.status === 'done';
   const notDone = item.status === 'not_done';
   const timeLabel = item.schedule.has_fixed_time === 1 ? `${item.schedule.start_time ?? '--:--'}-${item.schedule.end_time ?? '--:--'}` : 'Sem horario';
@@ -129,14 +130,23 @@ function ActivityRow({ item, disabled, onToggle }: { item: PlannedActivityItem; 
   return (
     <Pressable onPress={onToggle} disabled={disabled} style={({ pressed }) => [styles.row, done && styles.rowDone, notDone && styles.rowNotDone, disabled && styles.rowDisabled, pressed && styles.pressed]}>
       <View style={[styles.marker, { backgroundColor: `${accent}24` }]}>
-        <Clock3 color={accent} size={16} strokeWidth={2.4} />
+        <Icon color={accent} size={16} strokeWidth={2.4} />
       </View>
       <View style={styles.rowCopy}>
         <Text style={styles.timeText}>{timeLabel}</Text>
         <Text style={styles.rowName} numberOfLines={1}>
           {item.activity.name}
         </Text>
-        <Text style={styles.rowMeta}>{getStatusLabel(item.status)}</Text>
+        <View style={styles.rowMetaLine}>
+          <Text style={styles.rowMeta}>{getStatusLabel(item.status)}</Text>
+          {item.activity.category_name || item.activity.category ? (
+            <View style={[styles.categoryChip, { borderColor: `${accent}66`, backgroundColor: `${accent}14` }]}>
+              <Text style={styles.categoryChipText} numberOfLines={1}>
+                {item.activity.category_name ?? item.activity.category}
+              </Text>
+            </View>
+          ) : null}
+        </View>
       </View>
       <View style={[styles.check, done && { backgroundColor: accent, borderColor: accent }]}>
         {done ? <Check color={colors.white} size={17} strokeWidth={3} /> : <Circle color={notDone ? colors.danger : colors.textSubtle} size={19} />}
@@ -292,7 +302,25 @@ const styles = StyleSheet.create({
   rowMeta: {
     color: colors.textSubtle,
     fontSize: typography.tiny,
+  },
+  rowMetaLine: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
     marginTop: spacing.xs,
+  },
+  categoryChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    maxWidth: 140,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  categoryChipText: {
+    color: colors.text,
+    fontSize: typography.tiny,
+    fontWeight: '800',
   },
   check: {
     alignItems: 'center',

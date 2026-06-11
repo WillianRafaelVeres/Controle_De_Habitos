@@ -241,18 +241,30 @@ export function StudyScreen() {
             {activities.length === 0 ? (
               <TextField label="Nome da atividade" value={manualActivityName} onChangeText={setManualActivityName} placeholder="Ex.: CNPI" />
             ) : (
-              <View style={styles.activityGrid}>
-                {activities.map((activity) => {
-                  const selected = activity.id === selectedActivityId;
+              <View style={styles.activityGroups}>
+                {groupActivitiesByCategory(activities).map((group) => (
+                  <View key={group.label} style={styles.activityGroup}>
+                    <Text style={styles.activityGroupTitle}>{group.label}</Text>
+                    <View style={styles.activityGrid}>
+                      {group.activities.map((activity) => {
+                        const selected = activity.id === selectedActivityId;
+                        const accent = activity.color ?? activity.category_color ?? colors.secondary;
 
-                  return (
-                    <Pressable key={activity.id} onPress={() => setSelectedActivityId(activity.id)} style={[styles.activityPill, selected && styles.activePill]}>
-                      <Text style={[styles.activityText, selected && styles.activePillText]} numberOfLines={1}>
-                        {activity.name}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
+                        return (
+                          <Pressable
+                            key={activity.id}
+                            onPress={() => setSelectedActivityId(activity.id)}
+                            style={[styles.activityPill, selected && { borderColor: accent, backgroundColor: `${accent}18` }]}
+                          >
+                            <Text style={[styles.activityText, selected && styles.activePillText]} numberOfLines={1}>
+                              {activity.name}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ))}
               </View>
             )}
           </Card>
@@ -368,6 +380,20 @@ function formatDuration(totalSeconds: number) {
   return `${hours}h ${String(minutes).padStart(2, '0')}min`;
 }
 
+function groupActivitiesByCategory(activities: Activity[]) {
+  const groups = new Map<string, { label: string; activities: Activity[] }>();
+
+  for (const activity of activities) {
+    const label = activity.category_name ?? activity.category ?? 'Geral';
+    const group = groups.get(label) ?? { label, activities: [] };
+
+    group.activities.push(activity);
+    groups.set(label, group);
+  }
+
+  return [...groups.values()];
+}
+
 const styles = StyleSheet.create({
   screen: {
     gap: spacing.lg,
@@ -387,6 +413,18 @@ const styles = StyleSheet.create({
   },
   cardGap: {
     gap: spacing.md,
+  },
+  activityGroups: {
+    gap: spacing.md,
+  },
+  activityGroup: {
+    gap: spacing.sm,
+  },
+  activityGroupTitle: {
+    color: colors.textMuted,
+    fontSize: typography.small,
+    fontWeight: '900',
+    textTransform: 'uppercase',
   },
   activityGrid: {
     flexDirection: 'row',

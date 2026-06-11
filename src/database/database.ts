@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -55,10 +55,24 @@ export async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_routine_logs_date ON routine_logs(date);
     CREATE INDEX IF NOT EXISTS idx_routine_logs_routine_id ON routine_logs(routine_id);
 
+    CREATE TABLE IF NOT EXISTS categories (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      icon TEXT,
+      color TEXT,
+      sort_order INTEGER DEFAULT 0,
+      is_active INTEGER DEFAULT 1,
+      archived_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS activities (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       description TEXT,
+      category_id TEXT,
       category TEXT,
       icon TEXT,
       color TEXT,
@@ -66,7 +80,8 @@ export async function initDatabase() {
       is_active INTEGER DEFAULT 1,
       archived_at TEXT,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(category_id) REFERENCES categories(id)
     );
 
     CREATE TABLE IF NOT EXISTS weekly_schedules (
@@ -114,6 +129,7 @@ export async function initDatabase() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_weekly_schedules_weekday ON weekly_schedules(weekday);
+    CREATE INDEX IF NOT EXISTS idx_activities_category_id ON activities(category_id);
     CREATE INDEX IF NOT EXISTS idx_daily_logs_date ON daily_logs(date);
     CREATE INDEX IF NOT EXISTS idx_daily_logs_activity_id ON daily_logs(activity_id);
     CREATE INDEX IF NOT EXISTS idx_study_sessions_started_at ON study_sessions(started_at);
@@ -133,6 +149,7 @@ async function migrateDatabase(db: SQLite.SQLiteDatabase) {
   await migrateRoutinesTable(db);
   await migrateRoutineLogsTable(db);
   await migrateQtsTables(db);
+  await migrateCategories(db);
   await setMetaValueFromDb(db, 'schema_version', String(SCHEMA_VERSION));
 }
 
@@ -258,9 +275,11 @@ async function createPreMigrationBackup(db: SQLite.SQLiteDatabase, fromVersion: 
     return;
   }
 
-  const [routines, routineLogs, appMeta] = await Promise.all([
+  const [routines, routineLogs, categories, activities, appMeta] = await Promise.all([
     db.getAllAsync('SELECT * FROM routines ORDER BY created_at ASC'),
     db.getAllAsync('SELECT * FROM routine_logs ORDER BY date ASC, created_at ASC'),
+    db.getAllAsync('SELECT * FROM categories ORDER BY sort_order ASC, name ASC'),
+    db.getAllAsync('SELECT * FROM activities ORDER BY created_at ASC'),
     db.getAllAsync('SELECT * FROM app_meta ORDER BY key ASC'),
   ]);
 
@@ -273,6 +292,8 @@ async function createPreMigrationBackup(db: SQLite.SQLiteDatabase, fromVersion: 
       to_schema_version: SCHEMA_VERSION,
       routines,
       routine_logs: routineLogs,
+      categories,
+      activities,
       app_meta: appMeta,
     }),
   );
@@ -368,6 +389,123 @@ async function migrateQtsTables(db: SQLite.SQLiteDatabase) {
   await setMetaValueFromDb(db, 'qts_migration_done', '1');
 }
 
+const DEFAULT_CATEGORIES = [
+  { name: 'Estudos', description: 'Materias, cursos e leituras.', icon: 'book', color: '#7C5CFF', sort_order: 10 },
+  { name: 'Saude', description: 'Corpo, movimento e cuidado pessoal.', icon: 'heart', color: '#31D08A', sort_order: 20 },
+  { name: 'Trabalho', description: 'Atividades profissionais.', icon: 'target', color: '#38BDF8', sort_order: 30 },
+  { name: 'Oracao', description: 'Vida espiritual e devocional.', icon: 'sparkles', color: '#F5B84B', sort_order: 40 },
+  { name: 'Casa', description: 'Organizacao domestica.', icon: 'coffee', color: '#26D9FF', sort_order: 50 },
+  { name: 'Desenvolvimento', description: 'Crescimento pessoal e projetos.', icon: 'brain', color: '#D946EF', sort_order: 60 },
+  { name: 'Geral', description: 'Rotinas sem categoria especifica.', icon: 'target', color: '#A1A1AA', sort_order: 70 },
+];
+
+async function migrateCategories(db: SQLite.SQLiteDatabase) {
+  await migrateActivitiesCategoryColumn(db);
+  await seedDefaultCategoriesIfNeeded(db);
+
+  const activities = await db.getAllAsync<{ id: string; category: string | null; category_id: string | null }>(
+    'SELECT id, category, category_id FROM activities ORDER BY created_at ASC',
+  );
+
+  for (const activity of activities) {
+    if (activity.category_id) {
+      continue;
+    }
+
+    const categoryName = activity.category?.trim() || 'Geral';
+    const category = await ensureCategoryByName(db, categoryName);
+
+    await db.runAsync('UPDATE activities SET category_id = ?, category = ?, updated_at = ? WHERE id = ?', [
+      category.id,
+      category.name,
+      new Date().toISOString(),
+      activity.id,
+    ]);
+  }
+}
+
+async function migrateActivitiesCategoryColumn(db: SQLite.SQLiteDatabase) {
+  const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(activities)');
+  const hasCategoryId = columns.some((column) => column.name === 'category_id');
+
+  if (!hasCategoryId) {
+    await db.runAsync('ALTER TABLE activities ADD COLUMN category_id TEXT');
+  }
+
+  await db.execAsync('CREATE INDEX IF NOT EXISTS idx_activities_category_id ON activities(category_id)');
+}
+
+async function seedDefaultCategoriesIfNeeded(db: SQLite.SQLiteDatabase) {
+  const row = await db.getFirstAsync<{ total: number }>('SELECT COUNT(*) as total FROM categories');
+
+  if ((row?.total ?? 0) > 0) {
+    return;
+  }
+
+  for (const category of DEFAULT_CATEGORIES) {
+    await insertCategory(db, category);
+  }
+}
+
+async function ensureCategoryByName(db: SQLite.SQLiteDatabase, rawName: string) {
+  const name = rawName.trim() || 'Geral';
+  const normalized = normalizeCategoryName(name);
+  const categories = await db.getAllAsync<{ id: string; name: string }>('SELECT id, name FROM categories');
+  const existing = categories.find((category) => normalizeCategoryName(category.name) === normalized);
+
+  if (existing) {
+    return existing;
+  }
+
+  const defaults = DEFAULT_CATEGORIES.find((category) => normalizeCategoryName(category.name) === normalized);
+
+  return insertCategory(db, defaults ?? { name, description: null, icon: 'target', color: '#A1A1AA', sort_order: 100 });
+}
+
+async function insertCategory(
+  db: SQLite.SQLiteDatabase,
+  category: { name: string; description?: string | null; icon?: string | null; color?: string | null; sort_order?: number },
+) {
+  const timestamp = new Date().toISOString();
+  const id = createCategoryId(category.name);
+
+  await db.runAsync(
+    `
+      INSERT INTO categories (
+        id, name, description, icon, color, sort_order, is_active, archived_at, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
+      ON CONFLICT(id) DO NOTHING
+    `,
+    [
+      id,
+      category.name.trim(),
+      category.description ?? null,
+      category.icon ?? 'target',
+      category.color ?? '#A1A1AA',
+      category.sort_order ?? 100,
+      timestamp,
+      timestamp,
+    ],
+  );
+
+  return { id, name: category.name.trim() };
+}
+
+function createCategoryId(name: string) {
+  const normalized = normalizeCategoryName(name)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+  return `category_${normalized || 'geral'}`;
+}
+
+function normalizeCategoryName(name: string) {
+  return name.trim().replace(/\s+/g, '').toLocaleLowerCase('pt-BR');
+}
+
 export async function getMetaValue(key: string) {
   const db = await getDatabase();
 
@@ -399,10 +537,11 @@ async function setMetaValueFromDb(db: SQLite.SQLiteDatabase, key: string, value:
 
 export async function exportDatabaseSnapshot() {
   const db = await getDatabase();
-  const [appMeta, routines, routineLogs, activities, weeklySchedules, dailyLogs, studySessions] = await Promise.all([
+  const [appMeta, routines, routineLogs, categories, activities, weeklySchedules, dailyLogs, studySessions] = await Promise.all([
     db.getAllAsync('SELECT * FROM app_meta ORDER BY key ASC'),
     db.getAllAsync('SELECT * FROM routines ORDER BY created_at ASC'),
     db.getAllAsync('SELECT * FROM routine_logs ORDER BY date ASC, created_at ASC'),
+    db.getAllAsync('SELECT * FROM categories ORDER BY sort_order ASC, name ASC'),
     db.getAllAsync('SELECT * FROM activities ORDER BY created_at ASC'),
     db.getAllAsync('SELECT * FROM weekly_schedules ORDER BY weekday ASC, start_time ASC'),
     db.getAllAsync('SELECT * FROM daily_logs ORDER BY date ASC, created_at ASC'),
@@ -417,6 +556,7 @@ export async function exportDatabaseSnapshot() {
       app_meta: appMeta,
       routines,
       routine_logs: routineLogs,
+      categories,
       activities,
       weekly_schedules: weeklySchedules,
       daily_logs: dailyLogs,
@@ -435,8 +575,10 @@ export async function clearDatabase() {
     await db.runAsync('DELETE FROM daily_logs');
     await db.runAsync('DELETE FROM weekly_schedules');
     await db.runAsync('DELETE FROM activities');
+    await db.runAsync('DELETE FROM categories');
     await db.runAsync('DELETE FROM routine_logs');
     await db.runAsync('DELETE FROM routines');
+    await seedDefaultCategoriesIfNeeded(db);
     await db.runAsync(
       `
         INSERT INTO app_meta (key, value)

@@ -2,6 +2,7 @@ import type { Routine, RoutineFormValues } from '../types';
 import { createId } from '../utils/id';
 import { ROUTINE_COLORS, ROUTINE_ICONS } from '../utils/routineVisuals';
 import { getDatabase, getMetaValue, setMetaValue } from './database';
+import { getCategories } from './categoriesRepository';
 import { countActivities, createActivity } from './qtsRepository';
 
 function nowIso() {
@@ -203,12 +204,15 @@ export async function seedInitialRoutines() {
   }
 
   if (activityTotal === 0) {
+    const categories = await getCategories(false);
+    const categoryByName = new Map(categories.map((category) => [category.name.toLocaleLowerCase('pt-BR'), category.id]));
+
     await createActivity({
       name: 'Planejamento do dia',
       description: 'Definir prioridades antes de comecar.',
-      category: 'Foco',
-      icon: 'target',
-      color: '#7C5CFF',
+      category_id: categoryByName.get('trabalho') ?? categoryByName.get('geral') ?? null,
+      icon: null,
+      color: null,
       type: 'task',
       weekdays: [1, 2, 3, 4, 5],
       has_fixed_time: false,
@@ -217,9 +221,9 @@ export async function seedInitialRoutines() {
     await createActivity({
       name: 'Treino ou caminhada',
       description: 'Movimento para manter energia.',
-      category: 'Saude',
-      icon: 'dumbbell',
-      color: '#31D08A',
+      category_id: categoryByName.get('saude') ?? categoryByName.get('geral') ?? null,
+      icon: null,
+      color: null,
       type: 'exercise',
       weekdays: [1, 3, 5],
       has_fixed_time: false,
@@ -228,9 +232,9 @@ export async function seedInitialRoutines() {
     await createActivity({
       name: 'Leitura',
       description: 'Pelo menos 20 minutos de leitura.',
-      category: 'Desenvolvimento',
-      icon: 'book',
-      color: '#F5B84B',
+      category_id: categoryByName.get('estudos') ?? categoryByName.get('desenvolvimento') ?? categoryByName.get('geral') ?? null,
+      icon: null,
+      color: null,
       type: 'study',
       weekdays: [0, 1, 2, 3, 4, 5, 6],
       has_fixed_time: false,

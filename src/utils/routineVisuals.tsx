@@ -11,6 +11,7 @@ import {
   Sparkles,
   Target,
 } from 'lucide-react-native';
+import type { Activity, Category } from '../types';
 
 export type RoutineIconOption = {
   key: string;
@@ -48,4 +49,20 @@ export function getRoutineIcon(iconKey?: string | null) {
 
 export function getRoutineColor(color?: string | null) {
   return color ?? ROUTINE_COLORS[0];
+}
+
+export function getActivityColor(activity: Pick<Activity, 'color' | 'category_color'>) {
+  return activity.color || activity.category_color || ROUTINE_COLORS[0];
+}
+
+export function getActivityIcon(activity: Pick<Activity, 'icon' | 'category_icon'>) {
+  return getRoutineIcon(activity.icon || activity.category_icon);
+}
+
+export function getCategoryColor(category?: Pick<Category, 'color'> | null) {
+  return category?.color || ROUTINE_COLORS[0];
+}
+
+export function getCategoryIcon(category?: Pick<Category, 'icon'> | null) {
+  return getRoutineIcon(category?.icon);
 }

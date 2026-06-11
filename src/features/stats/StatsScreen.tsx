@@ -7,9 +7,9 @@ import { EmptyState } from '../../components/EmptyState';
 import { ProgressBar } from '../../components/ProgressBar';
 import { Screen } from '../../components/Screen';
 import { SectionHeader } from '../../components/SectionHeader';
-import { getAllStudySessions, getPlannedItemsForDate } from '../../database';
+import { getAllStudySessions, getCategories, getPlannedItemsForDate } from '../../database';
 import { colors, radii, spacing, typography } from '../../theme';
-import type { PlannedActivityItem, StudySession } from '../../types';
+import type { Category, PlannedActivityItem, StudySession } from '../../types';
 import { addDays, dateToKey, parseDateKey, todayKey } from '../../utils/date';
 import { getRoutineColor } from '../../utils/routineVisuals';
 
@@ -31,6 +31,7 @@ type RoutineProgress = {
   id: string;
   name: string;
   color: string | null;
+  categoryName: string;
   planned: number;
   completed: number;
   percentage: number;
@@ -38,7 +39,18 @@ type RoutineProgress = {
 
 type StudyByActivity = {
   name: string;
+  color?: string | null;
   seconds: number;
+};
+
+type CategoryProgress = {
+  id: string;
+  name: string;
+  color: string | null;
+  planned: number;
+  completed: number;
+  percentage: number;
+  routineCount: number;
 };
 
 type StatsData = {
@@ -47,10 +59,13 @@ type StatsData = {
   month: Summary;
   weekdayRates: WeekdayRate[];
   routineProgress: RoutineProgress[];
+  categoryProgress: CategoryProgress[];
+  weekCategoryProgress: CategoryProgress[];
   studyTodaySeconds: number;
   studyWeekSeconds: number;
   studyMonthSeconds: number;
   studyByActivity: StudyByActivity[];
+  studyByCategory: StudyByActivity[];
   focus: {
     completedSessions: number;
     totalSeconds: number;
@@ -129,6 +144,25 @@ export function StatsScreen() {
           </Card>
 
           <Card style={styles.cardGap}>
+            <SectionHeader title="Cumprimento por categoria" subtitle="Mes atual ate hoje" />
+            {stats.weekCategoryProgress.length >= 2 ? (
+              <View style={styles.rankingGrid}>
+                <FocusMetric label="Melhor semana" value={stats.weekCategoryProgress[0].name} />
+                <FocusMetric label="Pior semana" value={stats.weekCategoryProgress[stats.weekCategoryProgress.length - 1].name} />
+              </View>
+            ) : null}
+            {stats.categoryProgress.length === 0 ? (
+              <Text style={styles.emptyText}>Sem categorias planejadas neste mes.</Text>
+            ) : (
+              <View style={styles.list}>
+                {stats.categoryProgress.map((item) => (
+                  <CategoryProgressRow key={item.id} item={item} />
+                ))}
+              </View>
+            )}
+          </Card>
+
+          <Card style={styles.cardGap}>
             <SectionHeader title="Tempo de estudo" subtitle="Sessoes finalizadas" />
             <View style={styles.studyGrid}>
               <StudyMetric label="Hoje" seconds={stats.studyTodaySeconds} />
@@ -162,6 +196,22 @@ export function StatsScreen() {
           </Card>
 
           <Card style={styles.cardGap}>
+            <SectionHeader title="Tempo por categoria" subtitle="Mes atual" />
+            {stats.studyByCategory.length === 0 ? (
+              <Text style={styles.emptyText}>Sem estudo registrado por categoria.</Text>
+            ) : (
+              <View style={styles.list}>
+                {stats.studyByCategory.map((item) => (
+                  <View key={item.name} style={styles.studyRow}>
+                    <Text style={styles.studyName} numberOfLines={1}>{item.name}</Text>
+                    <Text style={styles.studyValue}>{formatDuration(item.seconds)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </Card>
+
+          <Card style={styles.cardGap}>
             <SectionHeader title="Progresso por rotina" subtitle="Mes atual ate hoje" />
             {stats.routineProgress.length === 0 ? (
               <Text style={styles.emptyText}>Sem rotinas previstas neste mes.</Text>
@@ -174,7 +224,7 @@ export function StatsScreen() {
                       <Text style={styles.routinePercent}>{item.percentage}%</Text>
                     </View>
                     <ProgressBar value={item.percentage} height={7} color={getRoutineColor(item.color)} />
-                    <Text style={styles.routineDetail}>{item.completed} de {item.planned} previstos</Text>
+                    <Text style={styles.routineDetail}>{item.completed} de {item.planned} previstos - {item.categoryName}</Text>
                   </View>
                 ))}
               </View>
@@ -213,12 +263,13 @@ async function buildStatsData(): Promise<StatsData> {
     return keys.map((key) => cache.get(key) ?? []);
   }
 
-  const [todayItems, weekItems, monthItems, last90Items, sessions] = await Promise.all([
+  const [todayItems, weekItems, monthItems, last90Items, sessions, categories] = await Promise.all([
     getItems([today]),
     getItems(weekKeys),
     getItems(monthKeys),
     getItems(last90Keys),
     getAllStudySessions(),
+    getCategories(false),
   ]);
 
   const weekStart = weekKeys[0];
@@ -230,10 +281,13 @@ async function buildStatsData(): Promise<StatsData> {
     month: summarizeItems(monthItems),
     weekdayRates: buildWeekdayRates(last90Keys, last90Items),
     routineProgress: buildRoutineProgress(monthItems),
+    categoryProgress: buildCategoryProgress(monthItems, categories),
+    weekCategoryProgress: buildCategoryProgress(weekItems, categories),
     studyTodaySeconds: sumStudySeconds(sessions, today, today),
     studyWeekSeconds: sumStudySeconds(sessions, weekStart, today),
     studyMonthSeconds: sumStudySeconds(sessions, monthStart, today),
     studyByActivity: buildStudyByActivity(sessions, monthStart, today),
+    studyByCategory: buildStudyByCategory(sessions, monthStart, today),
     focus: buildFocusStats(sessions),
   };
 }
@@ -292,7 +346,8 @@ function buildRoutineProgress(days: PlannedActivityItem[][]): RoutineProgress[] 
         {
           id: item.activity.id,
           name: item.activity.name,
-          color: item.activity.color,
+          color: item.activity.color ?? item.activity.category_color ?? null,
+          categoryName: item.activity.category_name ?? item.activity.category ?? 'Geral',
           planned: 0,
           completed: 0,
           percentage: 0,
@@ -302,6 +357,35 @@ function buildRoutineProgress(days: PlannedActivityItem[][]): RoutineProgress[] 
       current.completed += item.status === 'done' ? 1 : 0;
       current.percentage = current.planned > 0 ? Math.round((current.completed / current.planned) * 100) : 0;
       grouped.set(item.activity.id, current);
+    }
+  }
+
+  return [...grouped.values()].sort((a, b) => b.percentage - a.percentage || a.name.localeCompare(b.name));
+}
+
+function buildCategoryProgress(days: PlannedActivityItem[][], categories: Category[]): CategoryProgress[] {
+  const categoryCounts = new Map(categories.map((category) => [category.id, category.active_activity_count ?? 0]));
+  const grouped = new Map<string, CategoryProgress>();
+
+  for (const items of days) {
+    for (const item of items) {
+      const id = item.activity.category_id ?? 'uncategorized';
+      const current =
+        grouped.get(id) ??
+        {
+          id,
+          name: item.activity.category_name ?? item.activity.category ?? 'Geral',
+          color: item.activity.category_color ?? item.activity.color ?? null,
+          planned: 0,
+          completed: 0,
+          percentage: 0,
+          routineCount: item.activity.category_id ? categoryCounts.get(item.activity.category_id) ?? 0 : 0,
+        };
+
+      current.planned += 1;
+      current.completed += item.status === 'done' ? 1 : 0;
+      current.percentage = current.planned > 0 ? Math.round((current.completed / current.planned) * 100) : 0;
+      grouped.set(id, current);
     }
   }
 
@@ -324,6 +408,26 @@ function buildStudyByActivity(sessions: StudySession[], startDate: string, endDa
   return [...grouped.entries()]
     .map(([name, seconds]) => ({ name, seconds }))
     .sort((a, b) => b.seconds - a.seconds);
+}
+
+function buildStudyByCategory(sessions: StudySession[], startDate: string, endDate: string): StudyByActivity[] {
+  const grouped = new Map<string, StudyByActivity>();
+
+  for (const session of sessions) {
+    const key = dateToKey(new Date(session.started_at));
+
+    if (key < startDate || key > endDate) {
+      continue;
+    }
+
+    const name = session.category_name ?? 'Geral';
+    const current = grouped.get(name) ?? { name, color: session.category_color, seconds: 0 };
+
+    current.seconds += session.actual_study_seconds;
+    grouped.set(name, current);
+  }
+
+  return [...grouped.values()].sort((a, b) => b.seconds - a.seconds);
 }
 
 function buildFocusStats(sessions: StudySession[]) {
@@ -403,6 +507,23 @@ function StudyMetric({ label, seconds }: { label: string; seconds: number }) {
     <View style={styles.studyMetric}>
       <Text style={styles.metricLabel}>{label}</Text>
       <Text style={styles.metricValue}>{formatDuration(seconds)}</Text>
+    </View>
+  );
+}
+
+function CategoryProgressRow({ item }: { item: CategoryProgress }) {
+  const accent = item.color ?? colors.secondary;
+
+  return (
+    <View style={styles.routineRow}>
+      <View style={styles.routineTop}>
+        <Text style={styles.routineName} numberOfLines={1}>{item.name}</Text>
+        <Text style={styles.routinePercent}>{item.percentage}%</Text>
+      </View>
+      <ProgressBar value={item.percentage} height={7} color={accent} />
+      <Text style={styles.routineDetail}>
+        {item.completed} de {item.planned} previstos - {item.routineCount} rotinas ativas
+      </Text>
     </View>
   );
 }

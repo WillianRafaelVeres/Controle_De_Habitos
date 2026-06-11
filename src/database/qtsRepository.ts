@@ -7,9 +7,8 @@ import type {
   StudySession,
   WeeklySchedule,
 } from '../types';
-import { dateToKey, parseDateKey, todayKey } from '../utils/date';
+import { parseDateKey, todayKey } from '../utils/date';
 import { createId } from '../utils/id';
-import { ROUTINE_COLORS, ROUTINE_ICONS } from '../utils/routineVisuals';
 import { getDatabase } from './database';
 
 function nowIso() {
@@ -27,15 +26,19 @@ type PlannedRow = Activity & {
   schedule_is_active: number;
   schedule_created_at: string;
   schedule_updated_at: string;
+  category_name: string | null;
+  category_icon: string | null;
+  category_color: string | null;
 };
 
 function normalizeActivityInput(values: ActivityFormValues) {
   return {
     name: values.name.trim(),
     description: values.description?.trim() || null,
+    category_id: values.category_id || null,
     category: values.category?.trim() || null,
-    icon: values.icon || ROUTINE_ICONS[0].key,
-    color: values.color || ROUTINE_COLORS[0],
+    icon: values.icon ?? null,
+    color: values.color ?? null,
     type: values.type || 'habit',
     weekdays: values.weekdays.length > 0 ? values.weekdays : [0, 1, 2, 3, 4, 5, 6],
     has_fixed_time: values.has_fixed_time ? 1 : 0,
@@ -51,10 +54,15 @@ export async function getActivities(includeArchived = false) {
 
   return db.getAllAsync<Activity>(
     `
-      SELECT *
-      FROM activities
-      ${includeArchived ? '' : 'WHERE archived_at IS NULL'}
-      ORDER BY archived_at IS NOT NULL ASC, is_active DESC, name ASC
+      SELECT
+        a.*,
+        c.name as category_name,
+        c.icon as category_icon,
+        c.color as category_color
+      FROM activities a
+      LEFT JOIN categories c ON c.id = a.category_id
+      ${includeArchived ? '' : 'WHERE a.archived_at IS NULL'}
+      ORDER BY a.archived_at IS NOT NULL ASC, c.sort_order ASC, a.is_active DESC, a.name ASC
     `,
   );
 }
@@ -64,10 +72,19 @@ export async function getStudyActivities() {
 
   return db.getAllAsync<Activity>(
     `
-      SELECT *
-      FROM activities
-      WHERE archived_at IS NULL AND is_active = 1 AND type = 'study'
-      ORDER BY name ASC
+      SELECT
+        a.*,
+        c.name as category_name,
+        c.icon as category_icon,
+        c.color as category_color
+      FROM activities a
+      LEFT JOIN categories c ON c.id = a.category_id
+      WHERE a.archived_at IS NULL AND a.is_active = 1
+      ORDER BY
+        CASE WHEN lower(c.name) = 'estudos' THEN 0 ELSE 1 END,
+        CASE WHEN a.type = 'study' THEN 0 ELSE 1 END,
+        c.sort_order ASC,
+        a.name ASC
     `,
   );
 }
@@ -101,12 +118,16 @@ export async function getActivitiesWithSchedules(includeArchived = false): Promi
 export async function createActivity(values: ActivityFormValues) {
   const db = await getDatabase();
   const normalized = normalizeActivityInput(values);
+  const category = await resolveCategory(db, normalized.category_id);
+  const categoryId = category?.id ?? normalized.category_id ?? null;
+  const categoryName = category?.name ?? normalized.category;
   const timestamp = nowIso();
   const activity: Activity = {
     id: createId('activity'),
     name: normalized.name,
     description: normalized.description,
-    category: normalized.category,
+    category_id: categoryId,
+    category: categoryName,
     icon: normalized.icon,
     color: normalized.color,
     type: normalized.type,
@@ -120,15 +141,16 @@ export async function createActivity(values: ActivityFormValues) {
     await db.runAsync(
       `
         INSERT INTO activities (
-          id, name, description, category, icon, color, type,
+          id, name, description, category_id, category, icon, color, type,
           is_active, archived_at, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
       `,
       [
         activity.id,
         activity.name,
         activity.description,
+        activity.category_id,
         activity.category,
         activity.icon,
         activity.color,
@@ -148,6 +170,9 @@ export async function createActivity(values: ActivityFormValues) {
 export async function updateActivity(id: string, values: ActivityFormValues) {
   const db = await getDatabase();
   const normalized = normalizeActivityInput(values);
+  const category = await resolveCategory(db, normalized.category_id);
+  const categoryId = category?.id ?? normalized.category_id ?? null;
+  const categoryName = category?.name ?? normalized.category;
   const timestamp = nowIso();
 
   await db.withTransactionAsync(async () => {
@@ -156,6 +181,7 @@ export async function updateActivity(id: string, values: ActivityFormValues) {
         UPDATE activities
         SET name = ?,
             description = ?,
+            category_id = ?,
             category = ?,
             icon = ?,
             color = ?,
@@ -167,7 +193,8 @@ export async function updateActivity(id: string, values: ActivityFormValues) {
       [
         normalized.name,
         normalized.description,
-        normalized.category,
+        categoryId,
+        categoryName,
         normalized.icon,
         normalized.color,
         normalized.type,
@@ -212,6 +239,21 @@ async function insertSchedules(
   }
 }
 
+async function resolveCategory(db: Awaited<ReturnType<typeof getDatabase>>, categoryId: string | null) {
+  if (categoryId) {
+    const category = await db.getFirstAsync<{ id: string; name: string }>(
+      'SELECT id, name FROM categories WHERE id = ? AND archived_at IS NULL',
+      [categoryId],
+    );
+
+    if (category) {
+      return category;
+    }
+  }
+
+  return db.getFirstAsync<{ id: string; name: string }>("SELECT id, name FROM categories WHERE archived_at IS NULL AND name = 'Geral'");
+}
+
 export async function setActivityActive(id: string, isActive: boolean) {
   const db = await getDatabase();
 
@@ -241,6 +283,9 @@ export async function getPlannedItemsForDate(date: string): Promise<PlannedActiv
       `
         SELECT
           a.*,
+          c.name as category_name,
+          c.icon as category_icon,
+          c.color as category_color,
           s.id as schedule_id,
           s.activity_id as schedule_activity_id,
           s.weekday,
@@ -253,6 +298,7 @@ export async function getPlannedItemsForDate(date: string): Promise<PlannedActiv
           s.updated_at as schedule_updated_at
         FROM weekly_schedules s
         INNER JOIN activities a ON a.id = s.activity_id
+        LEFT JOIN categories c ON c.id = a.category_id
         WHERE s.weekday = ?
           AND s.is_active = 1
           AND (a.is_active = 1 OR (a.archived_at IS NOT NULL AND substr(a.archived_at, 1, 10) > ?))
@@ -283,9 +329,13 @@ export async function getPlannedItemsForDate(date: string): Promise<PlannedActiv
       id: row.id,
       name: row.name,
       description: row.description,
+      category_id: row.category_id,
       category: row.category,
       icon: row.icon,
       color: row.color,
+      category_name: row.category_name,
+      category_icon: row.category_icon,
+      category_color: row.category_color,
       type: row.type,
       is_active: row.is_active,
       archived_at: row.archived_at,
@@ -400,10 +450,17 @@ export async function getStudySessionsForRange(startDate: string, endDate: strin
 
   return db.getAllAsync<StudySession>(
     `
-      SELECT *
-      FROM study_sessions
-      WHERE substr(started_at, 1, 10) >= ? AND substr(started_at, 1, 10) <= ?
-      ORDER BY started_at ASC
+      SELECT
+        s.*,
+        c.id as category_id,
+        c.name as category_name,
+        c.icon as category_icon,
+        c.color as category_color
+      FROM study_sessions s
+      LEFT JOIN activities a ON a.id = s.activity_id
+      LEFT JOIN categories c ON c.id = a.category_id
+      WHERE substr(s.started_at, 1, 10) >= ? AND substr(s.started_at, 1, 10) <= ?
+      ORDER BY s.started_at ASC
     `,
     [startDate, endDate],
   );
@@ -412,5 +469,18 @@ export async function getStudySessionsForRange(startDate: string, endDate: strin
 export async function getAllStudySessions() {
   const db = await getDatabase();
 
-  return db.getAllAsync<StudySession>('SELECT * FROM study_sessions ORDER BY started_at ASC');
+  return db.getAllAsync<StudySession>(
+    `
+      SELECT
+        s.*,
+        c.id as category_id,
+        c.name as category_name,
+        c.icon as category_icon,
+        c.color as category_color
+      FROM study_sessions s
+      LEFT JOIN activities a ON a.id = s.activity_id
+      LEFT JOIN categories c ON c.id = a.category_id
+      ORDER BY s.started_at ASC
+    `,
+  );
 }

@@ -4,14 +4,16 @@ import { Save, X } from 'lucide-react-native';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { TextField } from '../../components/TextField';
 import { colors, radii, spacing, typography } from '../../theme';
-import type { ActivityFormValues, ActivityType, ActivityWithSchedules } from '../../types';
+import type { ActivityFormValues, ActivityType, ActivityWithSchedules, Category, CategoryFormValues } from '../../types';
 import { ROUTINE_COLORS, ROUTINE_ICONS } from '../../utils/routineVisuals';
 
 type RoutineFormModalProps = {
   visible: boolean;
   routine: ActivityWithSchedules | null;
+  categories: Category[];
   saving: boolean;
   onClose: () => void;
+  onCreateCategory: (values: CategoryFormValues) => Promise<Category>;
   onSubmit: (values: ActivityFormValues) => Promise<void>;
 };
 
@@ -37,14 +39,16 @@ const ACTIVITY_TYPES: Array<{ value: ActivityType; label: string }> = [
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-export function RoutineFormModal({ visible, routine, saving, onClose, onSubmit }: RoutineFormModalProps) {
+export function RoutineFormModal({ visible, routine, categories, saving, onClose, onCreateCategory, onSubmit }: RoutineFormModalProps) {
   const firstSchedule = useMemo(() => routine?.schedules[0] ?? null, [routine]);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('');
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [quickCategoryName, setQuickCategoryName] = useState('');
   const [type, setType] = useState<ActivityType>('habit');
   const [icon, setIcon] = useState(ROUTINE_ICONS[0].key);
   const [color, setColor] = useState(ROUTINE_COLORS[0]);
+  const [customVisual, setCustomVisual] = useState(false);
   const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [hasFixedTime, setHasFixedTime] = useState(false);
   const [startTime, setStartTime] = useState('08:00');
@@ -52,6 +56,10 @@ export function RoutineFormModal({ visible, routine, saving, onClose, onSubmit }
   const [reminderTime, setReminderTime] = useState('');
   const [isActive, setIsActive] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const selectedCategory = useMemo(
+    () => categories.find((category) => category.id === selectedCategoryId) ?? categories[0] ?? null,
+    [categories, selectedCategoryId],
+  );
 
   useEffect(() => {
     if (!visible) {
@@ -60,13 +68,17 @@ export function RoutineFormModal({ visible, routine, saving, onClose, onSubmit }
 
     const selectedWeekdays = routine?.schedules.map((schedule) => schedule.weekday) ?? [1, 2, 3, 4, 5];
     const schedule = routine?.schedules.find((item) => item.has_fixed_time === 1) ?? firstSchedule;
+    const currentCategory = categories.find((category) => category.id === routine?.category_id) ?? categories[0] ?? null;
+    const hasOwnVisual = Boolean(routine?.icon || routine?.color);
 
     setName(routine?.name ?? '');
     setDescription(routine?.description ?? '');
-    setCategory(routine?.category ?? '');
+    setSelectedCategoryId(currentCategory?.id ?? null);
+    setQuickCategoryName('');
     setType(routine?.type ?? 'habit');
-    setIcon(routine?.icon ?? ROUTINE_ICONS[0].key);
-    setColor(routine?.color ?? ROUTINE_COLORS[0]);
+    setIcon(routine?.icon ?? currentCategory?.icon ?? ROUTINE_ICONS[0].key);
+    setColor(routine?.color ?? currentCategory?.color ?? ROUTINE_COLORS[0]);
+    setCustomVisual(hasOwnVisual);
     setWeekdays(selectedWeekdays.length > 0 ? selectedWeekdays : [1, 2, 3, 4, 5]);
     setHasFixedTime(schedule?.has_fixed_time === 1);
     setStartTime(schedule?.start_time ?? '08:00');
@@ -74,7 +86,40 @@ export function RoutineFormModal({ visible, routine, saving, onClose, onSubmit }
     setReminderTime(schedule?.reminder_time ?? '');
     setIsActive(routine ? routine.is_active === 1 : true);
     setError(null);
-  }, [firstSchedule, routine, visible]);
+  }, [categories, firstSchedule, routine, visible]);
+
+  function selectCategory(category: Category) {
+    setSelectedCategoryId(category.id);
+
+    if (!customVisual) {
+      setIcon(category.icon ?? ROUTINE_ICONS[0].key);
+      setColor(category.color ?? ROUTINE_COLORS[0]);
+    }
+  }
+
+  async function handleQuickCreateCategory() {
+    if (!quickCategoryName.trim()) {
+      setError('Informe o nome da nova categoria.');
+      return;
+    }
+
+    try {
+      const category = await onCreateCategory({
+        name: quickCategoryName,
+        icon: 'target',
+        color: ROUTINE_COLORS[0],
+      });
+
+      setQuickCategoryName('');
+      setSelectedCategoryId(category.id);
+      setIcon(category.icon ?? ROUTINE_ICONS[0].key);
+      setColor(category.color ?? ROUTINE_COLORS[0]);
+      setCustomVisual(false);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Nao foi possivel criar a categoria.');
+    }
+  }
 
   function toggleWeekday(day: number) {
     setWeekdays((current) => {
@@ -97,6 +142,11 @@ export function RoutineFormModal({ visible, routine, saving, onClose, onSubmit }
       return;
     }
 
+    if (!selectedCategory?.id) {
+      setError('Selecione uma categoria.');
+      return;
+    }
+
     if (hasFixedTime && (!TIME_PATTERN.test(startTime) || !TIME_PATTERN.test(endTime))) {
       setError('Use horarios no formato HH:MM.');
       return;
@@ -110,9 +160,10 @@ export function RoutineFormModal({ visible, routine, saving, onClose, onSubmit }
     await onSubmit({
       name,
       description,
-      category,
-      icon,
-      color,
+      category_id: selectedCategory.id,
+      category: selectedCategory.name,
+      icon: customVisual ? icon : null,
+      color: customVisual ? color : null,
       type,
       weekdays,
       has_fixed_time: hasFixedTime,
@@ -147,7 +198,40 @@ export function RoutineFormModal({ visible, routine, saving, onClose, onSubmit }
               multiline
               style={styles.textArea}
             />
-            <TextField label="Categoria" value={category} onChangeText={setCategory} placeholder="Estudos, Saude, Trabalho..." />
+
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>Categoria</Text>
+              <View style={styles.categoryGrid}>
+                {categories.map((category) => {
+                  const selected = category.id === selectedCategory?.id;
+
+                  return (
+                    <Pressable
+                      key={category.id}
+                      onPress={() => selectCategory(category)}
+                      style={[
+                        styles.categoryPill,
+                        { borderColor: selected ? category.color ?? colors.secondary : colors.border },
+                        selected && { backgroundColor: `${category.color ?? colors.secondary}18` },
+                      ]}
+                    >
+                      <Text style={[styles.categoryText, selected && styles.categoryTextActive]} numberOfLines={1}>
+                        {category.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <View style={styles.quickCategory}>
+                <TextField
+                  label="Nova categoria rapida"
+                  value={quickCategoryName}
+                  onChangeText={setQuickCategoryName}
+                  placeholder="Ex.: Estudos"
+                />
+                <PrimaryButton label="Criar" onPress={handleQuickCreateCategory} variant="secondary" />
+              </View>
+            </View>
 
             <View style={styles.fieldGroup}>
               <Text style={styles.fieldLabel}>Tipo</Text>
@@ -235,7 +319,10 @@ export function RoutineFormModal({ visible, routine, saving, onClose, onSubmit }
                     <Pressable
                       accessibilityLabel={item.label}
                       key={item.key}
-                      onPress={() => setIcon(item.key)}
+                      onPress={() => {
+                        setIcon(item.key);
+                        setCustomVisual(true);
+                      }}
                       style={[styles.iconOption, selected && { borderColor: color, backgroundColor: `${color}20` }]}
                     >
                       <Icon size={20} color={selected ? color : colors.textMuted} strokeWidth={2.4} />
@@ -252,11 +339,28 @@ export function RoutineFormModal({ visible, routine, saving, onClose, onSubmit }
                   <Pressable
                     accessibilityLabel={`Cor ${item}`}
                     key={item}
-                    onPress={() => setColor(item)}
+                    onPress={() => {
+                      setColor(item);
+                      setCustomVisual(true);
+                    }}
                     style={[styles.colorOption, { backgroundColor: item }, item === color && styles.colorSelected]}
                   />
                 ))}
               </View>
+              {customVisual ? (
+                <Pressable
+                  onPress={() => {
+                    setCustomVisual(false);
+                    setIcon(selectedCategory?.icon ?? ROUTINE_ICONS[0].key);
+                    setColor(selectedCategory?.color ?? ROUTINE_COLORS[0]);
+                  }}
+                  style={styles.inheritButton}
+                >
+                  <Text style={styles.inheritText}>Usar visual da categoria</Text>
+                </Pressable>
+              ) : (
+                <Text style={styles.inheritHint}>Herdando cor e icone da categoria.</Text>
+              )}
             </View>
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -323,6 +427,30 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: typography.small,
     fontWeight: '700',
+  },
+  categoryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  categoryPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    maxWidth: '100%',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: 'rgba(161, 161, 170, 0.06)',
+  },
+  categoryText: {
+    color: colors.textMuted,
+    fontSize: typography.small,
+    fontWeight: '800',
+  },
+  categoryTextActive: {
+    color: colors.text,
+  },
+  quickCategory: {
+    gap: spacing.sm,
   },
   optionGrid: {
     flexDirection: 'row',
@@ -433,6 +561,25 @@ const styles = StyleSheet.create({
   },
   colorSelected: {
     borderColor: colors.white,
+  },
+  inheritButton: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: 'rgba(161, 161, 170, 0.06)',
+  },
+  inheritText: {
+    color: colors.text,
+    fontSize: typography.small,
+    fontWeight: '800',
+  },
+  inheritHint: {
+    color: colors.textSubtle,
+    fontSize: typography.tiny,
+    fontWeight: '700',
   },
   error: {
     color: colors.danger,

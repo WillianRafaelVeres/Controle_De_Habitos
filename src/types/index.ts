@@ -43,9 +43,13 @@ export type Activity = {
   id: string;
   name: string;
   description: string | null;
+  category_id: string | null;
   category: string | null;
   icon: string | null;
   color: string | null;
+  category_name?: string | null;
+  category_icon?: string | null;
+  category_color?: string | null;
   type: ActivityType;
   is_active: number;
   archived_at: string | null;
@@ -73,9 +77,10 @@ export type ActivityWithSchedules = Activity & {
 export type ActivityFormValues = {
   name: string;
   description?: string;
-  category?: string;
-  icon?: string;
-  color?: string;
+  category_id?: string | null;
+  category?: string | null;
+  icon?: string | null;
+  color?: string | null;
   type: ActivityType;
   weekdays: number[];
   has_fixed_time: boolean;
@@ -104,10 +109,37 @@ export type PlannedActivityItem = {
   status: 'planned' | 'done' | 'not_done' | 'pending';
 };
 
+export type Category = {
+  id: string;
+  name: string;
+  description: string | null;
+  icon: string | null;
+  color: string | null;
+  sort_order: number;
+  is_active: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+  active_activity_count?: number;
+  total_activity_count?: number;
+};
+
+export type CategoryFormValues = {
+  name: string;
+  description?: string;
+  icon?: string | null;
+  color?: string | null;
+  sort_order?: number;
+};
+
 export type StudySession = {
   id: string;
   activity_id: string | null;
   activity_name_snapshot: string;
+  category_id?: string | null;
+  category_name?: string | null;
+  category_icon?: string | null;
+  category_color?: string | null;
   started_at: string;
   ended_at: string | null;
   planned_focus_minutes: number;
