@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -54,6 +54,69 @@ export async function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_routine_logs_date ON routine_logs(date);
     CREATE INDEX IF NOT EXISTS idx_routine_logs_routine_id ON routine_logs(routine_id);
+
+    CREATE TABLE IF NOT EXISTS activities (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      category TEXT,
+      icon TEXT,
+      color TEXT,
+      type TEXT DEFAULT 'habit',
+      is_active INTEGER DEFAULT 1,
+      archived_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS weekly_schedules (
+      id TEXT PRIMARY KEY,
+      activity_id TEXT NOT NULL,
+      weekday INTEGER NOT NULL,
+      has_fixed_time INTEGER DEFAULT 0,
+      start_time TEXT,
+      end_time TEXT,
+      reminder_time TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(activity_id) REFERENCES activities(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS daily_logs (
+      id TEXT PRIMARY KEY,
+      activity_id TEXT NOT NULL,
+      schedule_id TEXT,
+      date TEXT NOT NULL,
+      completed INTEGER DEFAULT 0,
+      completed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(activity_id, schedule_id, date),
+      FOREIGN KEY(activity_id) REFERENCES activities(id),
+      FOREIGN KEY(schedule_id) REFERENCES weekly_schedules(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS study_sessions (
+      id TEXT PRIMARY KEY,
+      activity_id TEXT,
+      activity_name_snapshot TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      planned_focus_minutes INTEGER NOT NULL,
+      planned_break_minutes INTEGER NOT NULL,
+      actual_study_seconds INTEGER DEFAULT 0,
+      focus_breaks_count INTEGER DEFAULT 0,
+      completed INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(activity_id) REFERENCES activities(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_weekly_schedules_weekday ON weekly_schedules(weekday);
+    CREATE INDEX IF NOT EXISTS idx_daily_logs_date ON daily_logs(date);
+    CREATE INDEX IF NOT EXISTS idx_daily_logs_activity_id ON daily_logs(activity_id);
+    CREATE INDEX IF NOT EXISTS idx_study_sessions_started_at ON study_sessions(started_at);
   `);
 
   await migrateDatabase(db);
@@ -69,6 +132,7 @@ async function migrateDatabase(db: SQLite.SQLiteDatabase) {
 
   await migrateRoutinesTable(db);
   await migrateRoutineLogsTable(db);
+  await migrateQtsTables(db);
   await setMetaValueFromDb(db, 'schema_version', String(SCHEMA_VERSION));
 }
 
@@ -214,6 +278,96 @@ async function createPreMigrationBackup(db: SQLite.SQLiteDatabase, fromVersion: 
   );
 }
 
+async function migrateQtsTables(db: SQLite.SQLiteDatabase) {
+  const alreadyMigrated = await getMetaValueFromDb(db, 'qts_migration_done');
+
+  if (alreadyMigrated === '1') {
+    return;
+  }
+
+  const routines = await db.getAllAsync<{
+    id: string;
+    name: string;
+    description: string | null;
+    category: string | null;
+    icon: string | null;
+    color: string | null;
+    is_active: number;
+    archived_at: string | null;
+    created_at: string;
+    updated_at: string;
+  }>('SELECT id, name, description, category, icon, color, is_active, archived_at, created_at, updated_at FROM routines ORDER BY created_at ASC');
+  const routineLogs = await db.getAllAsync<{
+    id: string;
+    routine_id: string;
+    date: string;
+    completed: number;
+    completed_at: string | null;
+    created_at: string;
+    updated_at: string;
+  }>('SELECT id, routine_id, date, completed, completed_at, created_at, updated_at FROM routine_logs ORDER BY date ASC, created_at ASC');
+
+  await db.withTransactionAsync(async () => {
+    for (const routine of routines) {
+      await db.runAsync(
+        `
+          INSERT INTO activities (
+            id, name, description, category, icon, color, type,
+            is_active, archived_at, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, 'habit', ?, ?, ?, ?)
+          ON CONFLICT(id) DO NOTHING
+        `,
+        [
+          routine.id,
+          routine.name,
+          routine.description,
+          routine.category,
+          routine.icon,
+          routine.color,
+          routine.is_active,
+          routine.archived_at,
+          routine.created_at,
+          routine.updated_at,
+        ],
+      );
+
+      if (routine.archived_at) {
+        continue;
+      }
+
+      for (let weekday = 0; weekday <= 6; weekday += 1) {
+        await db.runAsync(
+          `
+            INSERT INTO weekly_schedules (
+              id, activity_id, weekday, has_fixed_time, start_time, end_time,
+              reminder_time, is_active, created_at, updated_at
+            )
+            VALUES (?, ?, ?, 0, NULL, NULL, NULL, ?, ?, ?)
+            ON CONFLICT(id) DO NOTHING
+          `,
+          [`${routine.id}-day-${weekday}`, routine.id, weekday, routine.is_active, routine.created_at, routine.updated_at],
+        );
+      }
+    }
+
+    for (const log of routineLogs) {
+      await db.runAsync(
+        `
+          INSERT INTO daily_logs (
+            id, activity_id, schedule_id, date, completed, completed_at, created_at, updated_at
+          )
+          VALUES (?, ?, NULL, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO NOTHING
+        `,
+        [log.id, log.routine_id, log.date, log.completed, log.completed_at, log.created_at, log.updated_at],
+      );
+    }
+  });
+
+  await setMetaValueFromDb(db, 'qts_migration_done', '1');
+}
+
 export async function getMetaValue(key: string) {
   const db = await getDatabase();
 
@@ -245,20 +399,28 @@ async function setMetaValueFromDb(db: SQLite.SQLiteDatabase, key: string, value:
 
 export async function exportDatabaseSnapshot() {
   const db = await getDatabase();
-  const [appMeta, routines, routineLogs] = await Promise.all([
+  const [appMeta, routines, routineLogs, activities, weeklySchedules, dailyLogs, studySessions] = await Promise.all([
     db.getAllAsync('SELECT * FROM app_meta ORDER BY key ASC'),
     db.getAllAsync('SELECT * FROM routines ORDER BY created_at ASC'),
     db.getAllAsync('SELECT * FROM routine_logs ORDER BY date ASC, created_at ASC'),
+    db.getAllAsync('SELECT * FROM activities ORDER BY created_at ASC'),
+    db.getAllAsync('SELECT * FROM weekly_schedules ORDER BY weekday ASC, start_time ASC'),
+    db.getAllAsync('SELECT * FROM daily_logs ORDER BY date ASC, created_at ASC'),
+    db.getAllAsync('SELECT * FROM study_sessions ORDER BY started_at ASC'),
   ]);
 
   return JSON.stringify(
     {
-      app: 'Controle de Habitos',
+      app: 'Rotina Estrategica',
       exported_at: new Date().toISOString(),
       schema_version: SCHEMA_VERSION,
       app_meta: appMeta,
       routines,
       routine_logs: routineLogs,
+      activities,
+      weekly_schedules: weeklySchedules,
+      daily_logs: dailyLogs,
+      study_sessions: studySessions,
     },
     null,
     2,
@@ -269,6 +431,10 @@ export async function clearDatabase() {
   const db = await getDatabase();
 
   await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM study_sessions');
+    await db.runAsync('DELETE FROM daily_logs');
+    await db.runAsync('DELETE FROM weekly_schedules');
+    await db.runAsync('DELETE FROM activities');
     await db.runAsync('DELETE FROM routine_logs');
     await db.runAsync('DELETE FROM routines');
     await db.runAsync(

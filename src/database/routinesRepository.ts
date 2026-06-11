@@ -2,6 +2,7 @@ import type { Routine, RoutineFormValues } from '../types';
 import { createId } from '../utils/id';
 import { ROUTINE_COLORS, ROUTINE_ICONS } from '../utils/routineVisuals';
 import { getDatabase, getMetaValue, setMetaValue } from './database';
+import { countActivities, createActivity } from './qtsRepository';
 
 function nowIso() {
   return new Date().toISOString();
@@ -166,8 +167,9 @@ export async function countRoutines() {
 
 export async function seedInitialRoutines() {
   const alreadySeeded = await getMetaValue('initial_seed_done');
+  const activityTotal = await countActivities();
 
-  if (alreadySeeded === '1') {
+  if (alreadySeeded === '1' && activityTotal > 0) {
     return;
   }
 
@@ -197,6 +199,43 @@ export async function seedInitialRoutines() {
       icon: 'book',
       color: '#F5B84B',
       monthly_goal_percent: 75,
+    });
+  }
+
+  if (activityTotal === 0) {
+    await createActivity({
+      name: 'Planejamento do dia',
+      description: 'Definir prioridades antes de comecar.',
+      category: 'Foco',
+      icon: 'target',
+      color: '#7C5CFF',
+      type: 'task',
+      weekdays: [1, 2, 3, 4, 5],
+      has_fixed_time: false,
+      is_active: true,
+    });
+    await createActivity({
+      name: 'Treino ou caminhada',
+      description: 'Movimento para manter energia.',
+      category: 'Saude',
+      icon: 'dumbbell',
+      color: '#31D08A',
+      type: 'exercise',
+      weekdays: [1, 3, 5],
+      has_fixed_time: false,
+      is_active: true,
+    });
+    await createActivity({
+      name: 'Leitura',
+      description: 'Pelo menos 20 minutos de leitura.',
+      category: 'Desenvolvimento',
+      icon: 'book',
+      color: '#F5B84B',
+      type: 'study',
+      weekdays: [0, 1, 2, 3, 4, 5, 6],
+      has_fixed_time: false,
+      reminder_time: '21:00',
+      is_active: true,
     });
   }
 

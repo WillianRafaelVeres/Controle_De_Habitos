@@ -37,6 +37,88 @@ export type RoutineFormValues = {
   monthly_goal_percent?: number | null;
 };
 
+export type ActivityType = 'study' | 'habit' | 'task' | 'prayer' | 'exercise' | 'work' | 'other';
+
+export type Activity = {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  icon: string | null;
+  color: string | null;
+  type: ActivityType;
+  is_active: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WeeklySchedule = {
+  id: string;
+  activity_id: string;
+  weekday: number;
+  has_fixed_time: number;
+  start_time: string | null;
+  end_time: string | null;
+  reminder_time: string | null;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ActivityWithSchedules = Activity & {
+  schedules: WeeklySchedule[];
+};
+
+export type ActivityFormValues = {
+  name: string;
+  description?: string;
+  category?: string;
+  icon?: string;
+  color?: string;
+  type: ActivityType;
+  weekdays: number[];
+  has_fixed_time: boolean;
+  start_time?: string | null;
+  end_time?: string | null;
+  reminder_time?: string | null;
+  is_active?: boolean;
+};
+
+export type DailyLog = {
+  id: string;
+  activity_id: string;
+  schedule_id: string | null;
+  date: string;
+  completed: number;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PlannedActivityItem = {
+  activity: Activity;
+  schedule: WeeklySchedule;
+  log: DailyLog | null;
+  date: string;
+  status: 'planned' | 'done' | 'not_done' | 'pending';
+};
+
+export type StudySession = {
+  id: string;
+  activity_id: string | null;
+  activity_name_snapshot: string;
+  started_at: string;
+  ended_at: string | null;
+  planned_focus_minutes: number;
+  planned_break_minutes: number;
+  actual_study_seconds: number;
+  focus_breaks_count: number;
+  completed: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type DayStatus = 'complete' | 'partial' | 'empty';
 
 export type RoutineProgress = {
@@ -74,7 +156,8 @@ export type MonthStats = {
 
 export type RootTabParamList = {
   Dashboard: undefined;
+  Qts: undefined;
   Routines: undefined;
-  Calendar: undefined;
+  Study: undefined;
   Stats: undefined;
 };

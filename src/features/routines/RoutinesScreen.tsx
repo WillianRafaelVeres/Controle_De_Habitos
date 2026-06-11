@@ -7,21 +7,32 @@ import { EmptyState } from '../../components/EmptyState';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { Screen } from '../../components/Screen';
 import { SectionHeader } from '../../components/SectionHeader';
-import { createRoutine, deleteRoutine, getRoutines, setRoutineActive, updateRoutine } from '../../database';
+import { archiveActivity, createActivity, getActivitiesWithSchedules, setActivityActive, updateActivity } from '../../database';
 import { colors, radii, spacing, typography } from '../../theme';
-import type { Routine, RoutineFormValues } from '../../types';
-import { getDaysInMonth } from '../../utils/date';
+import type { ActivityFormValues, ActivityType, ActivityWithSchedules } from '../../types';
 import { getRoutineColor, getRoutineIcon } from '../../utils/routineVisuals';
 import { RoutineFormModal } from './RoutineFormModal';
 
+const WEEKDAY_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
+
+const TYPE_LABELS: Record<ActivityType, string> = {
+  study: 'Estudo',
+  habit: 'Habito',
+  task: 'Tarefa',
+  prayer: 'Oracao',
+  exercise: 'Exercicio',
+  work: 'Trabalho',
+  other: 'Outro',
+};
+
 export function RoutinesScreen() {
-  const [routines, setRoutines] = useState<Routine[]>([]);
+  const [routines, setRoutines] = useState<ActivityWithSchedules[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
-  const [editingRoutine, setEditingRoutine] = useState<Routine | null>(null);
+  const [editingRoutine, setEditingRoutine] = useState<ActivityWithSchedules | null>(null);
   const [saving, setSaving] = useState(false);
 
   const loadRoutines = useCallback(async () => {
-    setRoutines(await getRoutines(true));
+    setRoutines(await getActivitiesWithSchedules(false));
   }, []);
 
   useFocusEffect(
@@ -35,19 +46,19 @@ export function RoutinesScreen() {
     setModalVisible(true);
   }
 
-  function openEdit(routine: Routine) {
+  function openEdit(routine: ActivityWithSchedules) {
     setEditingRoutine(routine);
     setModalVisible(true);
   }
 
-  async function handleSave(values: RoutineFormValues) {
+  async function handleSave(values: ActivityFormValues) {
     setSaving(true);
 
     try {
       if (editingRoutine) {
-        await updateRoutine(editingRoutine.id, values);
+        await updateActivity(editingRoutine.id, values);
       } else {
-        await createRoutine(values);
+        await createActivity(values);
       }
 
       setModalVisible(false);
@@ -58,38 +69,39 @@ export function RoutinesScreen() {
     }
   }
 
-  async function handleToggleActive(routine: Routine) {
-    await setRoutineActive(routine.id, routine.is_active !== 1);
+  async function handleToggleActive(routine: ActivityWithSchedules) {
+    await setActivityActive(routine.id, routine.is_active !== 1);
     await loadRoutines();
   }
 
-  function handleDelete(routine: Routine) {
-    Alert.alert('Remover rotina', `Remover "${routine.name}" da rotina atual? Os registros anteriores serao mantidos no historico e nas estatisticas.`, [
+  function handleArchive(routine: ActivityWithSchedules) {
+    Alert.alert('Arquivar rotina', `Remover "${routine.name}" da rotina atual? Os registros anteriores serao mantidos no historico.`, [
       { text: 'Cancelar', style: 'cancel' },
       {
-        text: 'Remover',
+        text: 'Arquivar',
         style: 'destructive',
         onPress: async () => {
-          await deleteRoutine(routine.id);
+          await archiveActivity(routine.id);
           await loadRoutines();
         },
       },
-    ], {
-      cancelable: true,
-    });
+    ]);
   }
 
   return (
     <Screen contentStyle={styles.screen}>
       <View style={styles.header}>
-        <Text style={styles.title}>Rotinas</Text>
-        <PrimaryButton label="Nova rotina" icon={Plus} onPress={openCreate} style={styles.addButton} />
+        <View style={styles.headerCopy}>
+          <Text style={styles.title}>Rotinas</Text>
+          <Text style={styles.subtitle}>Atividades planejadas no QTS</Text>
+        </View>
+        <PrimaryButton label="Nova" icon={Plus} onPress={openCreate} style={styles.addButton} />
       </View>
 
-      <SectionHeader title="Rotinas atuais" subtitle={`${routines.length} cadastradas`} />
+      <SectionHeader title="Rotinas ativas" subtitle={`${routines.length} cadastradas`} />
 
       {routines.length === 0 ? (
-        <EmptyState icon={Plus} title="Comece por uma rotina" subtitle="Cadastre uma rotina diaria para liberar progresso, calendario e estatisticas." />
+        <EmptyState icon={Plus} title="Nenhuma rotina" subtitle="Cadastre atividades com dias da semana e horario opcional." />
       ) : (
         <View style={styles.list}>
           {routines.map((routine) => (
@@ -97,7 +109,7 @@ export function RoutinesScreen() {
               key={routine.id}
               routine={routine}
               onEdit={() => openEdit(routine)}
-              onDelete={() => handleDelete(routine)}
+              onArchive={() => handleArchive(routine)}
               onToggleActive={() => handleToggleActive(routine)}
             />
           ))}
@@ -118,19 +130,17 @@ export function RoutinesScreen() {
 function RoutineCard({
   routine,
   onEdit,
-  onDelete,
+  onArchive,
   onToggleActive,
 }: {
-  routine: Routine;
+  routine: ActivityWithSchedules;
   onEdit: () => void;
-  onDelete: () => void;
+  onArchive: () => void;
   onToggleActive: () => void;
 }) {
   const accent = getRoutineColor(routine.color);
   const Icon = getRoutineIcon(routine.icon);
   const isActive = routine.is_active === 1;
-  const goalPercent = routine.monthly_goal_percent ?? 80;
-  const goalDays = Math.ceil(getDaysInMonth() * (goalPercent / 100));
 
   return (
     <Card style={[styles.routineCard, !isActive && styles.routineInactive]}>
@@ -144,36 +154,63 @@ function RoutineCard({
             {routine.name}
           </Text>
           <Text style={styles.routineMeta} numberOfLines={1}>
-            {routine.category || 'Rotina diaria'}
-            {` - Meta: ${goalPercent}% (${goalDays} dias neste mes)`}
+            {TYPE_LABELS[routine.type]}{routine.category ? ` - ${routine.category}` : ''}
           </Text>
-          {routine.description ? (
-            <Text style={styles.description} numberOfLines={2}>
-              {routine.description}
-            </Text>
-          ) : null}
         </View>
 
         <Switch
           value={isActive}
           onValueChange={onToggleActive}
           thumbColor={isActive ? colors.secondary : colors.textSubtle}
-          trackColor={{ false: 'rgba(148, 163, 184, 0.18)', true: 'rgba(38, 217, 255, 0.28)' }}
+          trackColor={{ false: 'rgba(148, 163, 184, 0.18)', true: 'rgba(20, 184, 166, 0.28)' }}
         />
       </View>
+
+      <View style={styles.scheduleBlock}>
+        <Text style={styles.scheduleLabel}>QTS</Text>
+        <Text style={styles.scheduleText}>{formatScheduleSummary(routine)}</Text>
+      </View>
+
+      {routine.description ? (
+        <Text style={styles.description} numberOfLines={2}>
+          {routine.description}
+        </Text>
+      ) : null}
 
       <View style={styles.actions}>
         <Pressable onPress={onEdit} style={styles.actionButton}>
           <Edit3 color={colors.textMuted} size={17} />
           <Text style={styles.actionText}>Editar</Text>
         </Pressable>
-        <Pressable onPress={onDelete} style={[styles.actionButton, styles.deleteButton]}>
+        <Pressable onPress={onArchive} style={[styles.actionButton, styles.deleteButton]}>
           <Archive color={colors.danger} size={17} />
           <Text style={[styles.actionText, styles.deleteText]}>Arquivar</Text>
         </Pressable>
       </View>
     </Card>
   );
+}
+
+function formatScheduleSummary(routine: ActivityWithSchedules) {
+  if (routine.schedules.length === 0) {
+    return 'Sem dias planejados';
+  }
+
+  const days = routine.schedules
+    .map((schedule) => schedule.weekday)
+    .filter((weekday, index, list) => list.indexOf(weekday) === index)
+    .sort((a, b) => a - b)
+    .map((weekday) => WEEKDAY_SHORT[weekday])
+    .join(', ');
+  const fixed = routine.schedules.find((schedule) => schedule.has_fixed_time === 1);
+
+  if (!fixed) {
+    const reminder = routine.schedules.find((schedule) => schedule.reminder_time)?.reminder_time;
+
+    return reminder ? `${days} - sem horario, lembrete ${reminder}` : `${days} - sem horario fixo`;
+  }
+
+  return `${days} - ${fixed.start_time ?? '--:--'} as ${fixed.end_time ?? '--:--'}`;
 }
 
 const styles = StyleSheet.create({
@@ -187,13 +224,22 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.md,
   },
+  headerCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
   title: {
     color: colors.text,
     fontSize: typography.title,
     fontWeight: '900',
   },
+  subtitle: {
+    color: colors.textMuted,
+    fontSize: typography.body,
+    marginTop: spacing.xs,
+  },
   addButton: {
-    minWidth: 136,
+    minWidth: 98,
   },
   list: {
     gap: spacing.md,
@@ -231,11 +277,24 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: spacing.xs,
   },
+  scheduleBlock: {
+    gap: spacing.xs,
+  },
+  scheduleLabel: {
+    color: colors.textSubtle,
+    fontSize: typography.tiny,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  scheduleText: {
+    color: colors.text,
+    fontSize: typography.small,
+    fontWeight: '700',
+  },
   description: {
     color: colors.textMuted,
     fontSize: typography.small,
     lineHeight: 18,
-    marginTop: spacing.sm,
   },
   actions: {
     flexDirection: 'row',

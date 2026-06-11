@@ -1,10 +1,11 @@
-import { BarChart3, CalendarDays, Home, ListChecks } from 'lucide-react-native';
+import { BarChart3, CalendarRange, Home, ListChecks, Timer } from 'lucide-react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import type { RootTabParamList } from '../types';
-import { CalendarScreen } from '../features/calendar/CalendarScreen';
 import { DashboardScreen } from '../features/dashboard/DashboardScreen';
+import { QtsScreen } from '../features/qts/QtsScreen';
 import { RoutinesScreen } from '../features/routines/RoutinesScreen';
 import { StatsScreen } from '../features/stats/StatsScreen';
+import { StudyScreen } from '../features/study/StudyScreen';
 import { colors, radii, spacing } from '../theme';
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -22,7 +23,7 @@ export function BottomTabs() {
           right: spacing.lg,
           bottom: spacing.lg,
           height: 72,
-          paddingTop: spacing.sm,
+          paddingTop: 7,
           paddingBottom: spacing.md,
           backgroundColor: 'rgba(18, 20, 25, 0.96)',
           borderTopWidth: 0,
@@ -32,7 +33,7 @@ export function BottomTabs() {
           elevation: 16,
         },
         tabBarLabelStyle: {
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: '700',
         },
       }}
@@ -41,8 +42,16 @@ export function BottomTabs() {
         name="Dashboard"
         component={DashboardScreen}
         options={{
-          title: 'Inicio',
+          title: 'Hoje',
           tabBarIcon: ({ color, size }) => <Home color={color} size={size} />,
+        }}
+      />
+      <Tab.Screen
+        name="Qts"
+        component={QtsScreen}
+        options={{
+          title: 'QTS',
+          tabBarIcon: ({ color, size }) => <CalendarRange color={color} size={size} />,
         }}
       />
       <Tab.Screen
@@ -54,11 +63,11 @@ export function BottomTabs() {
         }}
       />
       <Tab.Screen
-        name="Calendar"
-        component={CalendarScreen}
+        name="Study"
+        component={StudyScreen}
         options={{
-          title: 'Calendario',
-          tabBarIcon: ({ color, size }) => <CalendarDays color={color} size={size} />,
+          title: 'Estudo',
+          tabBarIcon: ({ color, size }) => <Timer color={color} size={size} />,
         }}
       />
       <Tab.Screen

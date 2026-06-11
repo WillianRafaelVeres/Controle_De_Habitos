@@ -1,99 +1,171 @@
 import { useCallback, useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { PlusCircle } from 'lucide-react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Check, ChevronLeft, ChevronRight, Circle, Clock3, PlusCircle } from 'lucide-react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { ProgressBar } from '../../components/ProgressBar';
-import { RoutineCheckRow } from '../../components/RoutineCheckRow';
 import { Screen } from '../../components/Screen';
 import { SectionHeader } from '../../components/SectionHeader';
-import { getLogsByDate, getRoutines, toggleRoutineCompletion } from '../../database';
-import { colors, spacing, typography } from '../../theme';
-import type { Routine, RoutineLog } from '../../types';
-import { formatReadableDate, todayKey } from '../../utils/date';
+import { getPlannedItemsForDate, setPlannedItemCompleted } from '../../database';
+import { colors, radii, spacing, typography } from '../../theme';
+import type { PlannedActivityItem } from '../../types';
+import { addDays, dateToKey, formatReadableDate, parseDateKey, todayKey } from '../../utils/date';
+import { getRoutineColor } from '../../utils/routineVisuals';
 
 export function DashboardScreen() {
-  const [routines, setRoutines] = useState<Routine[]>([]);
-  const [todayLogs, setTodayLogs] = useState<RoutineLog[]>([]);
+  const [selectedDate, setSelectedDate] = useState(todayKey());
+  const [items, setItems] = useState<PlannedActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const loadDashboard = useCallback(async () => {
-    const today = todayKey();
-
+  const loadDay = useCallback(async () => {
     setLoading(true);
-    const [activeRoutines, logsToday] = await Promise.all([
-      getRoutines(false),
-      getLogsByDate(today),
-    ]);
-
-    setRoutines(activeRoutines);
-    setTodayLogs(logsToday);
+    setItems(await getPlannedItemsForDate(selectedDate));
     setLoading(false);
-  }, []);
+  }, [selectedDate]);
 
   useFocusEffect(
     useCallback(() => {
-      loadDashboard();
-    }, [loadDashboard]),
+      loadDay();
+    }, [loadDay]),
   );
 
-  const checkedIds = useMemo(
-    () => new Set(todayLogs.filter((log) => log.completed === 1).map((log) => log.routine_id)),
-    [todayLogs],
+  const doneCount = items.filter((item) => item.status === 'done').length;
+  const plannedCount = items.length;
+  const progress = plannedCount > 0 ? Math.round((doneCount / plannedCount) * 100) : 0;
+  const fixedItems = useMemo(
+    () => items.filter((item) => item.schedule.has_fixed_time === 1).sort((a, b) => (a.schedule.start_time ?? '').localeCompare(b.schedule.start_time ?? '')),
+    [items],
   );
-  const completedToday = checkedIds.size;
-  const dailyProgress = routines.length > 0 ? Math.round((completedToday / routines.length) * 100) : 0;
+  const looseItems = useMemo(() => items.filter((item) => item.schedule.has_fixed_time !== 1), [items]);
+  const isFuture = selectedDate > todayKey();
 
-  async function handleToggle(routineId: string) {
-    await toggleRoutineCompletion(routineId);
-    await loadDashboard();
+  function changeDate(amount: number) {
+    setSelectedDate(dateToKey(addDays(parseDateKey(selectedDate), amount)));
+  }
+
+  async function handleToggle(item: PlannedActivityItem) {
+    if (isFuture) {
+      return;
+    }
+
+    await setPlannedItemCompleted(item, item.status !== 'done');
+    await loadDay();
   }
 
   return (
     <Screen contentStyle={styles.screen}>
       <View style={styles.header}>
-        <Text style={styles.title}>Inicio</Text>
-        <Text style={styles.subtitle}>{formatReadableDate(todayKey())}</Text>
+        <Text style={styles.title}>Hoje</Text>
+        <Text style={styles.subtitle}>{formatReadableDate(selectedDate)}</Text>
       </View>
 
-      <Card style={styles.progressCard}>
-        <View style={styles.progressTop}>
-          <View>
-            <Text style={styles.cardLabel}>Hoje</Text>
-            <Text style={styles.progressValue}>{dailyProgress}%</Text>
-          </View>
-          <Text style={styles.progressSummary}>{completedToday}/{routines.length}</Text>
+      <View style={styles.dateControls}>
+        <IconButton icon={ChevronLeft} onPress={() => changeDate(-1)} />
+        <Pressable onPress={() => setSelectedDate(todayKey())} style={styles.todayButton}>
+          <Text style={styles.todayButtonText}>Hoje</Text>
+        </Pressable>
+        <IconButton icon={ChevronRight} onPress={() => changeDate(1)} />
+      </View>
+
+      <Card style={styles.summaryCard}>
+        <View style={styles.summaryTop}>
+          <Text style={styles.summaryLabel}>Resumo do dia</Text>
+          <Text style={styles.summaryValue}>{progress}%</Text>
         </View>
-        <ProgressBar value={dailyProgress} height={8} />
-        <Text style={styles.progressDetail}>
-          {completedToday} de {routines.length} rotinas concluidas
+        <ProgressBar value={progress} height={8} />
+        <Text style={styles.summaryDetail}>
+          {doneCount} de {plannedCount} atividades feitas
         </Text>
       </Card>
 
-      <View style={styles.sectionBlock}>
-        <SectionHeader title="Rotinas de hoje" subtitle={loading ? 'Carregando...' : `${routines.length} ativas`} />
-        {routines.length === 0 ? (
-          <EmptyState
-            icon={PlusCircle}
-            title="Nenhuma rotina ativa"
-            subtitle="Crie sua primeira rotina na aba Rotinas para acompanhar seu dia."
-          />
-        ) : (
-          <View style={styles.list}>
-            {routines.map((routine) => (
-              <RoutineCheckRow
-                key={routine.id}
-                routine={routine}
-                checked={checkedIds.has(routine.id)}
-                onToggle={() => handleToggle(routine.id)}
-              />
-            ))}
-          </View>
-        )}
-      </View>
-
+      {plannedCount === 0 ? (
+        <EmptyState icon={PlusCircle} title="Nada previsto" subtitle="Cadastre rotinas na aba Rotinas para montar seu QTS semanal." />
+      ) : (
+        <>
+          <ActivitySection title="Com horario" items={fixedItems} loading={loading} onToggle={handleToggle} disabled={isFuture} />
+          <ActivitySection title="Sem horario fixo" items={looseItems} loading={loading} onToggle={handleToggle} disabled={isFuture} />
+        </>
+      )}
     </Screen>
+  );
+}
+
+function ActivitySection({
+  title,
+  items,
+  loading,
+  disabled,
+  onToggle,
+}: {
+  title: string;
+  items: PlannedActivityItem[];
+  loading: boolean;
+  disabled: boolean;
+  onToggle: (item: PlannedActivityItem) => void;
+}) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <View style={styles.section}>
+      <SectionHeader title={title} subtitle={loading ? 'Carregando...' : `${items.length} previstas`} />
+      <View style={styles.list}>
+        {items.map((item) => (
+          <ActivityRow key={`${item.schedule.id}-${item.date}`} item={item} disabled={disabled} onToggle={() => onToggle(item)} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function ActivityRow({ item, disabled, onToggle }: { item: PlannedActivityItem; disabled: boolean; onToggle: () => void }) {
+  const accent = getRoutineColor(item.activity.color);
+  const done = item.status === 'done';
+  const notDone = item.status === 'not_done';
+  const timeLabel = item.schedule.has_fixed_time === 1 ? `${item.schedule.start_time ?? '--:--'}-${item.schedule.end_time ?? '--:--'}` : 'Sem horario';
+
+  return (
+    <Pressable onPress={onToggle} disabled={disabled} style={({ pressed }) => [styles.row, done && styles.rowDone, notDone && styles.rowNotDone, disabled && styles.rowDisabled, pressed && styles.pressed]}>
+      <View style={[styles.marker, { backgroundColor: `${accent}24` }]}>
+        <Clock3 color={accent} size={16} strokeWidth={2.4} />
+      </View>
+      <View style={styles.rowCopy}>
+        <Text style={styles.timeText}>{timeLabel}</Text>
+        <Text style={styles.rowName} numberOfLines={1}>
+          {item.activity.name}
+        </Text>
+        <Text style={styles.rowMeta}>{getStatusLabel(item.status)}</Text>
+      </View>
+      <View style={[styles.check, done && { backgroundColor: accent, borderColor: accent }]}>
+        {done ? <Check color={colors.white} size={17} strokeWidth={3} /> : <Circle color={notDone ? colors.danger : colors.textSubtle} size={19} />}
+      </View>
+    </Pressable>
+  );
+}
+
+function getStatusLabel(status: PlannedActivityItem['status']) {
+  if (status === 'done') {
+    return 'Feito';
+  }
+
+  if (status === 'not_done') {
+    return 'Nao feito';
+  }
+
+  if (status === 'planned') {
+    return 'Previsto';
+  }
+
+  return 'Pendente';
+}
+
+function IconButton({ onPress, icon: Icon }: { onPress: () => void; icon: typeof ChevronLeft }) {
+  return (
+    <Pressable onPress={onPress} style={styles.iconButton}>
+      <Icon color={colors.text} size={18} strokeWidth={2.5} />
+    </Pressable>
   );
 }
 
@@ -108,44 +180,127 @@ const styles = StyleSheet.create({
   title: {
     color: colors.text,
     fontSize: typography.title,
-    fontWeight: '900',
+    fontWeight: '800',
   },
   subtitle: {
     color: colors.textMuted,
     fontSize: typography.body,
   },
-  progressCard: {
+  dateControls: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  iconButton: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceStrong,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    height: 38,
+    justifyContent: 'center',
+    width: 38,
+  },
+  todayButton: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceStrong,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    flex: 1,
+    height: 38,
+    justifyContent: 'center',
+  },
+  todayButtonText: {
+    color: colors.text,
+    fontSize: typography.small,
+    fontWeight: '800',
+  },
+  summaryCard: {
     gap: spacing.md,
   },
-  progressTop: {
+  summaryTop: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
-  cardLabel: {
+  summaryLabel: {
     color: colors.textMuted,
     fontSize: typography.small,
     fontWeight: '700',
   },
-  progressValue: {
+  summaryValue: {
     color: colors.text,
-    fontSize: 40,
-    fontWeight: '900',
-    marginTop: spacing.xs,
-  },
-  progressSummary: {
-    color: colors.text,
-    fontSize: typography.h2,
+    fontSize: 36,
     fontWeight: '800',
   },
-  progressDetail: {
+  summaryDetail: {
     color: colors.textMuted,
     fontSize: typography.small,
   },
-  sectionBlock: {
+  section: {
     gap: spacing.md,
   },
   list: {
     gap: spacing.md,
+  },
+  row: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.md,
+    minHeight: 72,
+    padding: spacing.md,
+  },
+  rowDone: {
+    borderColor: 'rgba(34, 197, 94, 0.36)',
+  },
+  rowNotDone: {
+    borderColor: 'rgba(239, 68, 68, 0.34)',
+  },
+  rowDisabled: {
+    opacity: 0.62,
+  },
+  pressed: {
+    opacity: 0.78,
+  },
+  marker: {
+    alignItems: 'center',
+    borderRadius: radii.md,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  rowCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  timeText: {
+    color: colors.textMuted,
+    fontSize: typography.tiny,
+    fontWeight: '800',
+  },
+  rowName: {
+    color: colors.text,
+    fontSize: typography.body,
+    fontWeight: '800',
+    marginTop: spacing.xs,
+  },
+  rowMeta: {
+    color: colors.textSubtle,
+    fontSize: typography.tiny,
+    marginTop: spacing.xs,
+  },
+  check: {
+    alignItems: 'center',
+    borderColor: colors.border,
+    borderRadius: 15,
+    borderWidth: 1,
+    height: 30,
+    justifyContent: 'center',
+    width: 30,
   },
 });
