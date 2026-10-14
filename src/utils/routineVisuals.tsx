@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react';
 import {
-  Activity,
+  Activity as ActivityIcon,
   BookOpen,
   Brain,
   Coffee,
@@ -21,7 +21,7 @@ export type RoutineIconOption = {
 
 export const ROUTINE_ICONS: RoutineIconOption[] = [
   { key: 'target', label: 'Meta', Icon: Target },
-  { key: 'activity', label: 'Atividade', Icon: Activity },
+  { key: 'activity', label: 'Atividade', Icon: ActivityIcon },
   { key: 'dumbbell', label: 'Treino', Icon: Dumbbell },
   { key: 'book', label: 'Leitura', Icon: BookOpen },
   { key: 'brain', label: 'Foco', Icon: Brain },

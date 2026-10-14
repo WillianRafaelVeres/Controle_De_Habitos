@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import { Save, X } from 'lucide-react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ChevronDown, Save, X } from 'lucide-react-native';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { TextField } from '../../components/TextField';
 import { colors, radii, spacing, typography } from '../../theme';
-import type { ActivityFormValues, ActivityType, ActivityWithSchedules, Category, CategoryFormValues } from '../../types';
-import { ROUTINE_COLORS, ROUTINE_ICONS } from '../../utils/routineVisuals';
+import type { ActivityFormValues, ActivityWithSchedules, Category } from '../../types';
 
 type RoutineFormModalProps = {
   visible: boolean;
@@ -13,7 +12,6 @@ type RoutineFormModalProps = {
   categories: Category[];
   saving: boolean;
   onClose: () => void;
-  onCreateCategory: (values: CategoryFormValues) => Promise<Category>;
   onSubmit: (values: ActivityFormValues) => Promise<void>;
 };
 
@@ -27,38 +25,39 @@ const WEEKDAYS = [
   { value: 6, label: 'Sab' },
 ];
 
-const ACTIVITY_TYPES: Array<{ value: ActivityType; label: string }> = [
-  { value: 'study', label: 'Estudo' },
-  { value: 'habit', label: 'Habito' },
-  { value: 'task', label: 'Tarefa' },
-  { value: 'prayer', label: 'Oracao' },
-  { value: 'exercise', label: 'Exercicio' },
-  { value: 'work', label: 'Trabalho' },
-  { value: 'other', label: 'Outro' },
-];
-
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-export function RoutineFormModal({ visible, routine, categories, saving, onClose, onCreateCategory, onSubmit }: RoutineFormModalProps) {
+export function RoutineFormModal({ visible, routine, categories, saving, onClose, onSubmit }: RoutineFormModalProps) {
   const firstSchedule = useMemo(() => routine?.schedules[0] ?? null, [routine]);
+  const fixedSchedule = useMemo(() => routine?.schedules.find((item) => item.has_fixed_time === 1) ?? null, [routine]);
+  const existingReminder = useMemo(() => routine?.schedules.find((item) => item.reminder_time)?.reminder_time ?? null, [routine]);
   const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
-  const [quickCategoryName, setQuickCategoryName] = useState('');
-  const [type, setType] = useState<ActivityType>('habit');
-  const [icon, setIcon] = useState(ROUTINE_ICONS[0].key);
-  const [color, setColor] = useState(ROUTINE_COLORS[0]);
-  const [customVisual, setCustomVisual] = useState(false);
+  const [categoryQuery, setCategoryQuery] = useState('');
+  const [categoryOpen, setCategoryOpen] = useState(false);
   const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [hasFixedTime, setHasFixedTime] = useState(false);
   const [startTime, setStartTime] = useState('08:00');
   const [endTime, setEndTime] = useState('08:40');
-  const [reminderTime, setReminderTime] = useState('');
   const [isActive, setIsActive] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const filteredCategories = useMemo(() => {
+    const query = normalizeCategory(categoryQuery);
+
+    if (!query) {
+      return categories;
+    }
+
+    return categories.filter((category) => normalizeCategory(category.name).includes(query));
+  }, [categories, categoryQuery]);
   const selectedCategory = useMemo(
-    () => categories.find((category) => category.id === selectedCategoryId) ?? categories[0] ?? null,
+    () => categories.find((category) => category.id === selectedCategoryId) ?? null,
     [categories, selectedCategoryId],
+  );
+  const fallbackCategory = useMemo(
+    () => categories.find((category) => normalizeCategory(category.name) === 'geral') ?? categories[0] ?? null,
+    [categories],
   );
 
   useEffect(() => {
@@ -66,60 +65,21 @@ export function RoutineFormModal({ visible, routine, categories, saving, onClose
       return;
     }
 
-    const selectedWeekdays = routine?.schedules.map((schedule) => schedule.weekday) ?? [1, 2, 3, 4, 5];
-    const schedule = routine?.schedules.find((item) => item.has_fixed_time === 1) ?? firstSchedule;
-    const currentCategory = categories.find((category) => category.id === routine?.category_id) ?? categories[0] ?? null;
-    const hasOwnVisual = Boolean(routine?.icon || routine?.color);
+    const selectedWeekdays = [...new Set(routine?.schedules.map((schedule) => schedule.weekday) ?? [1, 2, 3, 4, 5])];
+    const schedule = fixedSchedule ?? firstSchedule;
+    const currentCategory = categories.find((category) => category.id === routine?.category_id) ?? fallbackCategory;
 
     setName(routine?.name ?? '');
-    setDescription(routine?.description ?? '');
     setSelectedCategoryId(currentCategory?.id ?? null);
-    setQuickCategoryName('');
-    setType(routine?.type ?? 'habit');
-    setIcon(routine?.icon ?? currentCategory?.icon ?? ROUTINE_ICONS[0].key);
-    setColor(routine?.color ?? currentCategory?.color ?? ROUTINE_COLORS[0]);
-    setCustomVisual(hasOwnVisual);
+    setCategoryQuery(currentCategory?.name ?? '');
+    setCategoryOpen(false);
     setWeekdays(selectedWeekdays.length > 0 ? selectedWeekdays : [1, 2, 3, 4, 5]);
-    setHasFixedTime(schedule?.has_fixed_time === 1);
+    setHasFixedTime(Boolean(fixedSchedule));
     setStartTime(schedule?.start_time ?? '08:00');
     setEndTime(schedule?.end_time ?? '08:40');
-    setReminderTime(schedule?.reminder_time ?? '');
     setIsActive(routine ? routine.is_active === 1 : true);
     setError(null);
-  }, [categories, firstSchedule, routine, visible]);
-
-  function selectCategory(category: Category) {
-    setSelectedCategoryId(category.id);
-
-    if (!customVisual) {
-      setIcon(category.icon ?? ROUTINE_ICONS[0].key);
-      setColor(category.color ?? ROUTINE_COLORS[0]);
-    }
-  }
-
-  async function handleQuickCreateCategory() {
-    if (!quickCategoryName.trim()) {
-      setError('Informe o nome da nova categoria.');
-      return;
-    }
-
-    try {
-      const category = await onCreateCategory({
-        name: quickCategoryName,
-        icon: 'target',
-        color: ROUTINE_COLORS[0],
-      });
-
-      setQuickCategoryName('');
-      setSelectedCategoryId(category.id);
-      setIcon(category.icon ?? ROUTINE_ICONS[0].key);
-      setColor(category.color ?? ROUTINE_COLORS[0]);
-      setCustomVisual(false);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Nao foi possivel criar a categoria.');
-    }
-  }
+  }, [categories, fallbackCategory, firstSchedule, fixedSchedule, routine, visible]);
 
   function toggleWeekday(day: number) {
     setWeekdays((current) => {
@@ -129,6 +89,21 @@ export function RoutineFormModal({ visible, routine, categories, saving, onClose
 
       return [...current, day].sort((a, b) => a - b);
     });
+  }
+
+  function selectCategory(category: Category) {
+    setSelectedCategoryId(category.id);
+    setCategoryQuery(category.name);
+    setCategoryOpen(false);
+    setError(null);
+  }
+
+  function handleCategoryChange(value: string) {
+    const exactCategory = categories.find((category) => normalizeCategory(category.name) === normalizeCategory(value));
+
+    setCategoryQuery(value);
+    setSelectedCategoryId(exactCategory?.id ?? null);
+    setCategoryOpen(true);
   }
 
   async function handleSubmit() {
@@ -142,34 +117,31 @@ export function RoutineFormModal({ visible, routine, categories, saving, onClose
       return;
     }
 
-    if (!selectedCategory?.id) {
+    const category = selectedCategory ?? filteredCategories[0] ?? fallbackCategory;
+
+    if (!category) {
       setError('Selecione uma categoria.');
       return;
     }
 
     if (hasFixedTime && (!TIME_PATTERN.test(startTime) || !TIME_PATTERN.test(endTime))) {
-      setError('Use horarios no formato HH:MM.');
-      return;
-    }
-
-    if (reminderTime.trim() && !TIME_PATTERN.test(reminderTime.trim())) {
-      setError('Use o lembrete no formato HH:MM ou deixe em branco.');
+      setError('Preencha os horarios com 4 numeros, como 0800.');
       return;
     }
 
     await onSubmit({
       name,
-      description,
-      category_id: selectedCategory.id,
-      category: selectedCategory.name,
-      icon: customVisual ? icon : null,
-      color: customVisual ? color : null,
-      type,
+      description: routine?.description ?? '',
+      category_id: category.id,
+      category: category.name,
+      icon: null,
+      color: null,
+      type: isStudyCategory(category) ? 'study' : 'habit',
       weekdays,
       has_fixed_time: hasFixedTime,
       start_time: hasFixedTime ? startTime : null,
       end_time: hasFixedTime ? endTime : null,
-      reminder_time: reminderTime.trim() || null,
+      reminder_time: existingReminder,
       is_active: isActive,
     });
   }
@@ -179,77 +151,29 @@ export function RoutineFormModal({ visible, routine, categories, saving, onClose
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.overlay}>
         <View style={styles.sheet}>
           <View style={styles.header}>
-            <View>
+            <View style={styles.headerCopy}>
               <Text style={styles.title}>{routine ? 'Editar rotina' : 'Nova rotina'}</Text>
-              <Text style={styles.subtitle}>Planejamento semanal</Text>
+              <Text style={styles.subtitle}>Nome, categoria, dias e horario</Text>
             </View>
             <Pressable onPress={onClose} style={styles.closeButton}>
               <X color={colors.text} size={20} />
             </Pressable>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.form}>
-            <TextField label="Nome" value={name} onChangeText={setName} placeholder="Ex.: Espanhol" />
-            <TextField
-              label="Descricao opcional"
-              value={description}
-              onChangeText={setDescription}
-              placeholder="Detalhe rapido da rotina"
-              multiline
-              style={styles.textArea}
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
+            <TextField label="Nome" value={name} onChangeText={setName} placeholder="Ex.: Leitura" />
+
+            <CategorySelector
+              value={categoryQuery}
+              open={categoryOpen}
+              categories={filteredCategories}
+              onChangeText={handleCategoryChange}
+              onToggle={() => setCategoryOpen((current) => !current)}
+              onSelect={selectCategory}
             />
 
             <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Categoria</Text>
-              <View style={styles.categoryGrid}>
-                {categories.map((category) => {
-                  const selected = category.id === selectedCategory?.id;
-
-                  return (
-                    <Pressable
-                      key={category.id}
-                      onPress={() => selectCategory(category)}
-                      style={[
-                        styles.categoryPill,
-                        { borderColor: selected ? category.color ?? colors.secondary : colors.border },
-                        selected && { backgroundColor: `${category.color ?? colors.secondary}18` },
-                      ]}
-                    >
-                      <Text style={[styles.categoryText, selected && styles.categoryTextActive]} numberOfLines={1}>
-                        {category.name}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <View style={styles.quickCategory}>
-                <TextField
-                  label="Nova categoria rapida"
-                  value={quickCategoryName}
-                  onChangeText={setQuickCategoryName}
-                  placeholder="Ex.: Estudos"
-                />
-                <PrimaryButton label="Criar" onPress={handleQuickCreateCategory} variant="secondary" />
-              </View>
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Tipo</Text>
-              <View style={styles.optionGrid}>
-                {ACTIVITY_TYPES.map((item) => (
-                  <Pressable
-                    key={item.value}
-                    onPress={() => setType(item.value)}
-                    style={[styles.optionPill, type === item.value && styles.optionPillActive]}
-                  >
-                    <Text style={[styles.optionText, type === item.value && styles.optionTextActive]}>{item.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Dias da semana</Text>
+              <Text style={styles.fieldLabel}>Dias</Text>
               <View style={styles.weekdayRow}>
                 {WEEKDAYS.map((day) => {
                   const selected = weekdays.includes(day.value);
@@ -269,8 +193,8 @@ export function RoutineFormModal({ visible, routine, categories, saving, onClose
 
             <View style={styles.switchRow}>
               <View style={styles.switchCopy}>
-                <Text style={styles.switchTitle}>Tem horario fixo?</Text>
-                <Text style={styles.switchSubtitle}>{hasFixedTime ? 'Aparece no QTS por horario.' : 'Aparece em sem horario fixo.'}</Text>
+                <Text style={styles.switchTitle}>Horario fixo</Text>
+                <Text style={styles.switchSubtitle}>{hasFixedTime ? 'Aparece no QTS por horario.' : 'Aparece como sem horario.'}</Text>
               </View>
               <Switch
                 value={hasFixedTime}
@@ -281,95 +205,117 @@ export function RoutineFormModal({ visible, routine, categories, saving, onClose
             </View>
 
             {hasFixedTime ? (
-              <View style={styles.timeGrid}>
-                <TextField label="Inicio" value={startTime} onChangeText={setStartTime} placeholder="08:00" keyboardType="numbers-and-punctuation" />
-                <TextField label="Fim" value={endTime} onChangeText={setEndTime} placeholder="08:40" keyboardType="numbers-and-punctuation" />
+              <View style={styles.timeSection}>
+                <Text style={styles.fieldLabel}>Horario</Text>
+                <View style={styles.timeGrid}>
+                  <TimeField label="Inicio" value={startTime} onChangeText={setStartTime} />
+                  <TimeField label="Fim" value={endTime} onChangeText={setEndTime} />
+                </View>
               </View>
             ) : null}
 
-            <TextField
-              label="Lembrete opcional"
-              value={reminderTime}
-              onChangeText={setReminderTime}
-              placeholder="Ex.: 21:00"
-              keyboardType="numbers-and-punctuation"
-            />
-
-            <View style={styles.switchRow}>
-              <View style={styles.switchCopy}>
-                <Text style={styles.switchTitle}>Rotina ativa</Text>
-                <Text style={styles.switchSubtitle}>Rotinas inativas nao aparecem em Hoje.</Text>
-              </View>
-              <Switch
-                value={isActive}
-                onValueChange={setIsActive}
-                thumbColor={isActive ? colors.secondary : colors.textSubtle}
-                trackColor={{ false: 'rgba(148, 163, 184, 0.18)', true: 'rgba(20, 184, 166, 0.28)' }}
-              />
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Icone</Text>
-              <View style={styles.iconGrid}>
-                {ROUTINE_ICONS.map((item) => {
-                  const selected = item.key === icon;
-                  const Icon = item.Icon;
-
-                  return (
-                    <Pressable
-                      accessibilityLabel={item.label}
-                      key={item.key}
-                      onPress={() => {
-                        setIcon(item.key);
-                        setCustomVisual(true);
-                      }}
-                      style={[styles.iconOption, selected && { borderColor: color, backgroundColor: `${color}20` }]}
-                    >
-                      <Icon size={20} color={selected ? color : colors.textMuted} strokeWidth={2.4} />
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Cor</Text>
-              <View style={styles.colorGrid}>
-                {ROUTINE_COLORS.map((item) => (
-                  <Pressable
-                    accessibilityLabel={`Cor ${item}`}
-                    key={item}
-                    onPress={() => {
-                      setColor(item);
-                      setCustomVisual(true);
-                    }}
-                    style={[styles.colorOption, { backgroundColor: item }, item === color && styles.colorSelected]}
-                  />
-                ))}
-              </View>
-              {customVisual ? (
-                <Pressable
-                  onPress={() => {
-                    setCustomVisual(false);
-                    setIcon(selectedCategory?.icon ?? ROUTINE_ICONS[0].key);
-                    setColor(selectedCategory?.color ?? ROUTINE_COLORS[0]);
-                  }}
-                  style={styles.inheritButton}
-                >
-                  <Text style={styles.inheritText}>Usar visual da categoria</Text>
-                </Pressable>
-              ) : (
-                <Text style={styles.inheritHint}>Herdando cor e icone da categoria.</Text>
-              )}
-            </View>
-
             {error ? <Text style={styles.error}>{error}</Text> : null}
-            <PrimaryButton label={routine ? 'Salvar alteracoes' : 'Criar rotina'} icon={Save} loading={saving} onPress={handleSubmit} />
+            <PrimaryButton label={routine ? 'Salvar' : 'Criar rotina'} icon={Save} loading={saving} onPress={handleSubmit} />
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
     </Modal>
   );
+}
+
+function CategorySelector({
+  value,
+  open,
+  categories,
+  onChangeText,
+  onToggle,
+  onSelect,
+}: {
+  value: string;
+  open: boolean;
+  categories: Category[];
+  onChangeText: (value: string) => void;
+  onToggle: () => void;
+  onSelect: (category: Category) => void;
+}) {
+  return (
+    <View style={styles.fieldGroup}>
+      <Text style={styles.fieldLabel}>Categoria</Text>
+      <View style={styles.categoryInputWrap}>
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          onFocus={() => {
+            if (!open) {
+              onToggle();
+            }
+          }}
+          placeholder="Digite ou escolha"
+          placeholderTextColor={colors.textSubtle}
+          selectionColor={colors.secondary}
+          style={styles.categoryInput}
+        />
+        <Pressable accessibilityLabel="Mostrar categorias" onPress={onToggle} style={styles.categoryArrow}>
+          <ChevronDown color={colors.textMuted} size={20} />
+        </Pressable>
+      </View>
+
+      {open ? (
+        <View style={styles.categoryMenu}>
+          {categories.length === 0 ? (
+            <Text style={styles.emptyCategory}>Nenhuma categoria encontrada.</Text>
+          ) : (
+            categories.map((category) => (
+              <Pressable key={category.id} onPress={() => onSelect(category)} style={styles.categoryOption}>
+                <Text style={styles.categoryOptionText} numberOfLines={1}>
+                  {category.name}
+                </Text>
+              </Pressable>
+            ))
+          )}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function TimeField({ label, value, onChangeText }: { label: string; value: string; onChangeText: (value: string) => void }) {
+  return (
+    <View style={styles.timeField}>
+      <TextField
+        label={label}
+        value={value}
+        onChangeText={(text) => onChangeText(formatTimeInput(text))}
+        placeholder="0800"
+        keyboardType="number-pad"
+        maxLength={5}
+        style={styles.timeInput}
+      />
+    </View>
+  );
+}
+
+function formatTimeInput(value: string) {
+  const digits = value.replace(/\D/g, '').slice(0, 4);
+
+  if (digits.length <= 2) {
+    return digits;
+  }
+
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+}
+
+function normalizeCategory(value: string) {
+  return value
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '')
+    .toLocaleLowerCase('pt-BR');
+}
+
+function isStudyCategory(category: Category) {
+  return normalizeCategory(category.name).includes('estudo');
 }
 
 const styles = StyleSheet.create({
@@ -379,7 +325,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.66)',
   },
   sheet: {
-    maxHeight: '92%',
+    maxHeight: '86%',
     borderTopLeftRadius: radii.xl,
     borderTopRightRadius: radii.xl,
     backgroundColor: colors.backgroundSoft,
@@ -392,6 +338,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: spacing.lg,
+    gap: spacing.md,
+  },
+  headerCopy: {
+    flex: 1,
+    minWidth: 0,
   },
   title: {
     color: colors.text,
@@ -415,11 +366,6 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     paddingBottom: spacing.lg,
   },
-  textArea: {
-    minHeight: 82,
-    paddingTop: spacing.md,
-    textAlignVertical: 'top',
-  },
   fieldGroup: {
     gap: spacing.sm,
   },
@@ -428,54 +374,52 @@ const styles = StyleSheet.create({
     fontSize: typography.small,
     fontWeight: '700',
   },
-  categoryGrid: {
+  categoryInputWrap: {
+    alignItems: 'center',
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  categoryPill: {
-    borderRadius: 999,
-    borderWidth: 1,
-    maxWidth: '100%',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: 'rgba(161, 161, 170, 0.06)',
-  },
-  categoryText: {
-    color: colors.textMuted,
-    fontSize: typography.small,
-    fontWeight: '800',
-  },
-  categoryTextActive: {
-    color: colors.text,
-  },
-  quickCategory: {
-    gap: spacing.sm,
-  },
-  optionGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  optionPill: {
-    borderRadius: 999,
+    borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.border,
+    backgroundColor: 'rgba(8, 13, 31, 0.86)',
+  },
+  categoryInput: {
+    color: colors.text,
+    flex: 1,
+    fontSize: typography.body,
+    minHeight: 50,
+    paddingLeft: spacing.lg,
+    paddingRight: spacing.sm,
+  },
+  categoryArrow: {
+    width: 48,
+    minHeight: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoryMenu: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceStrong,
+    overflow: 'hidden',
+  },
+  categoryOption: {
+    minHeight: 42,
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(161, 161, 170, 0.1)',
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: 'rgba(161, 161, 170, 0.06)',
   },
-  optionPillActive: {
-    borderColor: colors.secondary,
-    backgroundColor: 'rgba(20, 184, 166, 0.14)',
-  },
-  optionText: {
-    color: colors.textMuted,
+  categoryOptionText: {
+    color: colors.text,
     fontSize: typography.small,
     fontWeight: '800',
   },
-  optionTextActive: {
-    color: colors.text,
+  emptyCategory: {
+    color: colors.textMuted,
+    fontSize: typography.small,
+    fontWeight: '700',
+    padding: spacing.md,
   },
   weekdayRow: {
     flexDirection: 'row',
@@ -528,58 +472,23 @@ const styles = StyleSheet.create({
     fontSize: typography.tiny,
     marginTop: spacing.xs,
   },
+  timeSection: {
+    gap: spacing.sm,
+    alignItems: 'center',
+  },
   timeGrid: {
     flexDirection: 'row',
     gap: spacing.md,
-  },
-  iconGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  iconOption: {
-    width: 44,
-    height: 44,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(8, 13, 31, 0.72)',
+    width: '100%',
   },
-  colorGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.md,
+  timeField: {
+    flex: 1,
+    maxWidth: 150,
   },
-  colorOption: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  colorSelected: {
-    borderColor: colors.white,
-  },
-  inheritButton: {
-    alignSelf: 'flex-start',
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: 'rgba(161, 161, 170, 0.06)',
-  },
-  inheritText: {
-    color: colors.text,
-    fontSize: typography.small,
-    fontWeight: '800',
-  },
-  inheritHint: {
-    color: colors.textSubtle,
-    fontSize: typography.tiny,
-    fontWeight: '700',
+  timeInput: {
+    textAlign: 'center',
+    fontWeight: '900',
   },
   error: {
     color: colors.danger,

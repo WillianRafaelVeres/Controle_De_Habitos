@@ -122,11 +122,28 @@ export function StatsScreen() {
         <EmptyState icon={BarChart3} title="Sem dados" subtitle="As estatisticas aparecem quando houver rotinas planejadas ou sessoes de estudo." />
       ) : (
         <>
-          <View style={styles.summaryGrid}>
-            <SummaryCard title="Hoje" summary={stats.today} />
-            <SummaryCard title="Semana" summary={stats.week} />
-            <SummaryCard title="Mes" summary={stats.month} />
-          </View>
+          <Card style={styles.overviewCard}>
+            <Text style={styles.overviewLabel}>Ultimos 30 dias</Text>
+            <View style={styles.overviewMain}>
+              <Text style={styles.overviewValue}>{stats.month.percentage}%</Text>
+              <View style={styles.overviewCopy}>
+                <Text style={styles.overviewTitle}>cumprimento do QTS</Text>
+                <Text style={styles.overviewSubtitle}>{stats.month.completed} de {stats.month.planned} rotinas previstas</Text>
+              </View>
+            </View>
+            <ProgressBar value={stats.month.percentage} height={9} color={getPerformanceColor(stats.month.percentage)} />
+          </Card>
+
+          <Card style={styles.performanceCard}>
+            <SectionHeader title="Desempenho" subtitle="Hoje, semana e ultimos 30 dias" />
+            <PerformanceChart
+              items={[
+                { label: 'Hoje', value: stats.today.percentage, color: colors.secondary },
+                { label: 'Semana', value: stats.week.percentage, color: colors.primary },
+                { label: '30 dias', value: stats.month.percentage, color: colors.warning },
+              ]}
+            />
+          </Card>
 
           <Card style={styles.cardGap}>
             <SectionHeader title="Desempenho por dia da semana" subtitle="Ultimos 90 dias" />
@@ -144,7 +161,7 @@ export function StatsScreen() {
           </Card>
 
           <Card style={styles.cardGap}>
-            <SectionHeader title="Cumprimento por categoria" subtitle="Mes atual ate hoje" />
+            <SectionHeader title="Cumprimento por categoria" subtitle="Ultimos 30 dias" />
             {stats.weekCategoryProgress.length >= 2 ? (
               <View style={styles.rankingGrid}>
                 <FocusMetric label="Melhor semana" value={stats.weekCategoryProgress[0].name} />
@@ -152,7 +169,7 @@ export function StatsScreen() {
               </View>
             ) : null}
             {stats.categoryProgress.length === 0 ? (
-              <Text style={styles.emptyText}>Sem categorias planejadas neste mes.</Text>
+              <Text style={styles.emptyText}>Sem categorias planejadas nos ultimos 30 dias.</Text>
             ) : (
               <View style={styles.list}>
                 {stats.categoryProgress.map((item) => (
@@ -167,14 +184,14 @@ export function StatsScreen() {
             <View style={styles.studyGrid}>
               <StudyMetric label="Hoje" seconds={stats.studyTodaySeconds} />
               <StudyMetric label="7 dias" seconds={stats.studyWeekSeconds} />
-              <StudyMetric label="Mes" seconds={stats.studyMonthSeconds} />
+              <StudyMetric label="30 dias" seconds={stats.studyMonthSeconds} />
             </View>
           </Card>
 
           <Card style={styles.cardGap}>
-            <SectionHeader title="Tempo por atividade" subtitle="Mes atual" />
+            <SectionHeader title="Tempo por atividade" subtitle="Ultimos 30 dias" />
             {stats.studyByActivity.length === 0 ? (
-              <Text style={styles.emptyText}>Sem estudo registrado neste mes.</Text>
+              <Text style={styles.emptyText}>Sem estudo registrado nos ultimos 30 dias.</Text>
             ) : (
               <>
                 {stats.studyByActivity.length >= 2 ? (
@@ -185,10 +202,7 @@ export function StatsScreen() {
                 ) : null}
                 <View style={styles.list}>
                   {stats.studyByActivity.map((item) => (
-                    <View key={item.name} style={styles.studyRow}>
-                      <Text style={styles.studyName} numberOfLines={1}>{item.name}</Text>
-                      <Text style={styles.studyValue}>{formatDuration(item.seconds)}</Text>
-                    </View>
+                    <StudyTimeRow key={item.name} item={item} maxSeconds={stats.studyByActivity[0]?.seconds ?? 0} />
                   ))}
                 </View>
               </>
@@ -196,25 +210,22 @@ export function StatsScreen() {
           </Card>
 
           <Card style={styles.cardGap}>
-            <SectionHeader title="Tempo por categoria" subtitle="Mes atual" />
+            <SectionHeader title="Tempo por categoria" subtitle="Ultimos 30 dias" />
             {stats.studyByCategory.length === 0 ? (
               <Text style={styles.emptyText}>Sem estudo registrado por categoria.</Text>
             ) : (
               <View style={styles.list}>
-                {stats.studyByCategory.map((item) => (
-                  <View key={item.name} style={styles.studyRow}>
-                    <Text style={styles.studyName} numberOfLines={1}>{item.name}</Text>
-                    <Text style={styles.studyValue}>{formatDuration(item.seconds)}</Text>
-                  </View>
-                ))}
+                  {stats.studyByCategory.map((item) => (
+                    <StudyTimeRow key={item.name} item={item} maxSeconds={stats.studyByCategory[0]?.seconds ?? 0} />
+                  ))}
               </View>
             )}
           </Card>
 
           <Card style={styles.cardGap}>
-            <SectionHeader title="Progresso por rotina" subtitle="Mes atual ate hoje" />
+            <SectionHeader title="Progresso por rotina" subtitle="Ultimos 30 dias" />
             {stats.routineProgress.length === 0 ? (
-              <Text style={styles.emptyText}>Sem rotinas previstas neste mes.</Text>
+              <Text style={styles.emptyText}>Sem rotinas previstas nos ultimos 30 dias.</Text>
             ) : (
               <View style={styles.list}>
                 {stats.routineProgress.map((item) => (
@@ -250,7 +261,7 @@ async function buildStatsData(): Promise<StatsData> {
   const reference = new Date();
   const today = todayKey();
   const weekKeys = getWeekToDateKeys(reference);
-  const monthKeys = getMonthToDateKeys(reference);
+  const monthKeys = getDateRangeKeys(addDays(reference, -29), reference);
   const last90Keys = getDateRangeKeys(addDays(reference, -89), reference);
   const cache = new Map<string, PlannedActivityItem[]>();
 
@@ -458,10 +469,6 @@ function getWeekToDateKeys(reference: Date) {
   return getDateRangeKeys(addDays(reference, -daysSinceMonday), reference);
 }
 
-function getMonthToDateKeys(reference: Date) {
-  return getDateRangeKeys(new Date(reference.getFullYear(), reference.getMonth(), 1), reference);
-}
-
 function getDateRangeKeys(startDate: Date, endDate: Date) {
   const keys: string[] = [];
   const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
@@ -491,14 +498,30 @@ function getPerformanceColor(percentage: number) {
   return colors.danger;
 }
 
-function SummaryCard({ title, summary }: { title: string; summary: Summary }) {
+function SummaryCard({ title, summary, color }: { title: string; summary: Summary; color: string }) {
   return (
-    <Card style={styles.summaryCard}>
+    <Card style={[styles.summaryCard, { borderLeftColor: color }]}>
       <Text style={styles.summaryTitle}>{title}</Text>
       <Text style={styles.summaryValue}>{summary.percentage}%</Text>
-      <ProgressBar value={summary.percentage} height={7} />
+      <ProgressBar value={summary.percentage} height={7} color={color} />
       <Text style={styles.summaryDetail}>{summary.completed} de {summary.planned} previstos</Text>
     </Card>
+  );
+}
+
+function PerformanceChart({ items }: { items: Array<{ label: string; value: number; color: string }> }) {
+  return (
+    <View style={styles.performanceGrid}>
+      {items.map((item) => (
+        <View key={item.label} style={styles.performanceItem}>
+          <View style={styles.performanceTrack}>
+            <View style={[styles.performanceFill, { height: `${Math.max(4, item.value)}%`, backgroundColor: item.color }]} />
+          </View>
+          <Text style={styles.performanceValue}>{item.value}%</Text>
+          <Text style={styles.performanceLabel}>{item.label}</Text>
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -524,6 +547,23 @@ function CategoryProgressRow({ item }: { item: CategoryProgress }) {
       <Text style={styles.routineDetail}>
         {item.completed} de {item.planned} previstos - {item.routineCount} rotinas ativas
       </Text>
+    </View>
+  );
+}
+
+function StudyTimeRow({ item, maxSeconds }: { item: StudyByActivity; maxSeconds: number }) {
+  const percentage = maxSeconds > 0 ? Math.max(6, Math.round((item.seconds / maxSeconds) * 100)) : 0;
+  const accent = item.color ?? colors.secondary;
+
+  return (
+    <View style={styles.studyTimeRow}>
+      <View style={styles.studyTimeTop}>
+        <Text style={styles.studyName} numberOfLines={1}>{item.name}</Text>
+        <Text style={styles.studyValue}>{formatDuration(item.seconds)}</Text>
+      </View>
+      <View style={styles.studyTrack}>
+        <View style={[styles.studyFill, { width: `${percentage}%`, backgroundColor: accent }]} />
+      </View>
     </View>
   );
 }
@@ -565,6 +605,42 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: typography.body,
   },
+  overviewCard: {
+    gap: spacing.md,
+    borderColor: 'rgba(20, 184, 166, 0.26)',
+    backgroundColor: 'rgba(20, 184, 166, 0.08)',
+  },
+  overviewLabel: {
+    color: colors.textMuted,
+    fontSize: typography.tiny,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  overviewMain: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  overviewValue: {
+    color: colors.text,
+    fontSize: 42,
+    fontWeight: '900',
+  },
+  overviewCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  overviewTitle: {
+    color: colors.text,
+    fontSize: typography.h3,
+    fontWeight: '900',
+  },
+  overviewSubtitle: {
+    color: colors.textMuted,
+    fontSize: typography.small,
+    fontWeight: '700',
+    marginTop: spacing.xs,
+  },
   loading: {
     alignItems: 'center',
     gap: spacing.md,
@@ -575,11 +651,46 @@ const styles = StyleSheet.create({
     fontSize: typography.small,
     fontWeight: '700',
   },
-  summaryGrid: {
+  performanceCard: {
     gap: spacing.md,
+  },
+  performanceGrid: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    height: 190,
+    justifyContent: 'space-around',
+  },
+  performanceItem: {
+    alignItems: 'center',
+    flex: 1,
+    gap: spacing.sm,
+  },
+  performanceTrack: {
+    flex: 1,
+    width: 30,
+    borderRadius: 999,
+    backgroundColor: 'rgba(161, 161, 170, 0.13)',
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
+  performanceFill: {
+    width: '100%',
+    borderRadius: 999,
+  },
+  performanceValue: {
+    color: colors.text,
+    fontSize: typography.body,
+    fontWeight: '900',
+  },
+  performanceLabel: {
+    color: colors.textMuted,
+    fontSize: typography.tiny,
+    fontWeight: '900',
+    textTransform: 'uppercase',
   },
   summaryCard: {
     gap: spacing.sm,
+    borderLeftWidth: 4,
   },
   summaryTitle: {
     color: colors.textMuted,
@@ -658,11 +769,27 @@ const styles = StyleSheet.create({
   list: {
     gap: spacing.md,
   },
-  studyRow: {
+  studyTimeRow: {
+    gap: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: 'rgba(161, 161, 170, 0.06)',
+    padding: spacing.md,
+  },
+  studyTimeTop: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: spacing.md,
     justifyContent: 'space-between',
+  },
+  studyTrack: {
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(161, 161, 170, 0.14)',
+    overflow: 'hidden',
+  },
+  studyFill: {
+    height: '100%',
+    borderRadius: 999,
   },
   studyName: {
     color: colors.text,

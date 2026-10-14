@@ -6,39 +6,43 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { Screen } from '../../components/Screen';
-import { SectionHeader } from '../../components/SectionHeader';
-import { getAllRoutines, getLogsForRange, setRoutineCompletion } from '../../database';
+import { getPlannedItemsForDate, setPlannedItemCompleted } from '../../database';
 import { colors, radii, spacing, typography } from '../../theme';
-import type { Routine, RoutineLog } from '../../types';
+import type { PlannedActivityItem } from '../../types';
 import {
-  calculateDailyPercentage,
   dateToKey,
   formatMonthTitle,
   formatReadableDate,
   getCalendarGrid,
-  getMonthRange,
   getMonthStart,
-  getRoutinesForDate,
   getWeekdayLabels,
   nextMonth,
   previousMonth,
   todayKey,
 } from '../../utils/date';
-import { getRoutineColor, getRoutineIcon } from '../../utils/routineVisuals';
+import { getActivityColor, getActivityIcon } from '../../utils/routineVisuals';
+
+type DayProgress = {
+  total: number;
+  completed: number;
+  percentage: number;
+};
 
 export function CalendarScreen() {
-  const [routines, setRoutines] = useState<Routine[]>([]);
-  const [logs, setLogs] = useState<RoutineLog[]>([]);
+  const [itemsByDate, setItemsByDate] = useState<Map<string, PlannedActivityItem[]>>(new Map());
   const [selectedDate, setSelectedDate] = useState(todayKey());
   const [monthDate, setMonthDate] = useState(() => getMonthStart(new Date()));
 
-  const loadCalendar = useCallback(async () => {
-    const range = getMonthRange(monthDate);
-    const [allRoutines, monthLogs] = await Promise.all([getAllRoutines(), getLogsForRange(range.start, range.end)]);
+  const cells = useMemo(() => getCalendarGrid(monthDate), [monthDate]);
+  const dateKeys = useMemo(() => cells.flatMap((cell) => (cell ? [cell.key] : [])), [cells]);
 
-    setRoutines(allRoutines);
-    setLogs(monthLogs);
-  }, [monthDate]);
+  const loadCalendar = useCallback(async () => {
+    const dayItems = await Promise.all(dateKeys.map((key) => getPlannedItemsForDate(key)));
+    const nextItems = new Map<string, PlannedActivityItem[]>();
+
+    dateKeys.forEach((key, index) => nextItems.set(key, dayItems[index]));
+    setItemsByDate(nextItems);
+  }, [dateKeys]);
 
   useFocusEffect(
     useCallback(() => {
@@ -46,48 +50,32 @@ export function CalendarScreen() {
     }, [loadCalendar]),
   );
 
-  const cells = useMemo(() => getCalendarGrid(monthDate), [monthDate]);
-  const logsForSelectedDate = useMemo(() => logs.filter((log) => log.date === selectedDate), [logs, selectedDate]);
-  const selectedProgress = useMemo(
-    () => calculateDailyPercentage(selectedDate, routines, logs),
-    [logs, routines, selectedDate],
-  );
-  const selectedItems = useMemo(() => {
-    const logsByRoutineId = new Map(logsForSelectedDate.map((log) => [log.routine_id, log]));
-
-    return getRoutinesForDate(selectedDate, routines, logsForSelectedDate).map((routine) => {
-      const log = logsByRoutineId.get(routine.id);
-      const checked = log?.completed === 1;
-
-      return {
-        routine,
-        checked,
-        displayName: checked && log?.routine_name_snapshot ? log.routine_name_snapshot : routine.name,
-      };
-    });
-  }, [logsForSelectedDate, routines, selectedDate]);
-  const selectedCompleted = useMemo(() => selectedItems.filter((item) => item.checked), [selectedItems]);
-  const selectedPending = useMemo(() => selectedItems.filter((item) => !item.checked), [selectedItems]);
+  const selectedItems = itemsByDate.get(selectedDate) ?? [];
+  const selectedProgress = summarizeItems(selectedItems);
+  const selectedCompleted = selectedItems.filter((item) => item.status === 'done');
+  const selectedPending = selectedItems.filter((item) => item.status !== 'done');
   const selectedIsFuture = selectedDate > todayKey();
 
   function changeMonth(nextDate: Date) {
     const firstDay = getMonthStart(nextDate);
+
     setMonthDate(firstDay);
     setSelectedDate(dateToKey(firstDay));
   }
 
   function goToToday() {
     const today = new Date();
+
     setMonthDate(getMonthStart(today));
     setSelectedDate(todayKey());
   }
 
-  async function handleToggleRoutine(routine: Routine, checked: boolean) {
+  async function handleToggle(item: PlannedActivityItem) {
     if (selectedIsFuture) {
       return;
     }
 
-    await setRoutineCompletion(routine.id, selectedDate, !checked);
+    await setPlannedItemCompleted(item, item.status !== 'done');
     await loadCalendar();
   }
 
@@ -95,7 +83,7 @@ export function CalendarScreen() {
     <Screen contentStyle={styles.screen}>
       <View style={styles.header}>
         <Text style={styles.title}>Calendario</Text>
-        <Text style={styles.subtitle}>Percentual diario de conclusao</Text>
+        <Text style={styles.subtitle}>Acompanhe suas rotinas no mes</Text>
       </View>
 
       <View style={styles.periodSelector}>
@@ -122,7 +110,7 @@ export function CalendarScreen() {
               return <View key={`blank-${index}`} style={styles.daySlot} />;
             }
 
-            const progress = calculateDailyPercentage(cell.key, routines, logs);
+            const progress = summarizeItems(itemsByDate.get(cell.key) ?? []);
             const selected = cell.key === selectedDate;
             const isFuture = cell.key > todayKey();
             const isPast = cell.key < todayKey();
@@ -143,46 +131,39 @@ export function CalendarScreen() {
             );
           })}
         </View>
-
-        <View style={styles.legend}>
-          <LegendItem color={colors.danger} label="Baixo" />
-          <LegendItem color="#FACC15" label="Parcial" />
-          <LegendItem color={colors.success} label="Completo" />
-        </View>
       </Card>
 
       <Card style={styles.detailCard}>
-        <SectionHeader title={formatReadableDate(selectedDate)} subtitle={`${selectedProgress.percentage}% concluido`} />
+        <View style={styles.detailHeader}>
+          <View>
+            <Text style={styles.detailDate}>{formatReadableDate(selectedDate)}</Text>
+            <Text style={styles.detailSubtitle}>{selectedProgress.completed} de {selectedProgress.total} concluídas</Text>
+          </View>
+          <Text style={styles.detailPercent}>{selectedProgress.percentage}%</Text>
+        </View>
+
         {selectedItems.length === 0 ? (
-          <EmptyState icon={CalendarDays} title="Nenhuma rotina neste dia" subtitle="Os registros aparecem conforme as rotinas existem no periodo selecionado." />
+          <EmptyState icon={CalendarDays} title="Nenhuma rotina neste dia" subtitle="Dias com rotinas aparecem aqui para acompanhar e marcar." />
         ) : (
           <>
-            <View style={styles.detailSummary}>
-              <Text style={styles.detailPercent}>{selectedProgress.percentage}%</Text>
-              <Text style={styles.detailText}>
-                {selectedProgress.completed} de {selectedProgress.total} metas concluidas
-              </Text>
-            </View>
-
-            <RoutineSection
-              title="Concluidas"
-              emptyText="Nenhuma rotina concluida neste dia."
-              items={selectedCompleted}
-              disabled={selectedIsFuture}
-              onToggle={handleToggleRoutine}
-            />
-            <RoutineSection
-              title="Pendentes"
-              emptyText="Nada pendente neste dia."
-              items={selectedPending}
-              disabled={selectedIsFuture}
-              onToggle={handleToggleRoutine}
-            />
+            <RoutineSection title="Concluidas" items={selectedCompleted} disabled={selectedIsFuture} onToggle={handleToggle} />
+            <RoutineSection title="Pendentes" items={selectedPending} disabled={selectedIsFuture} onToggle={handleToggle} />
           </>
         )}
       </Card>
     </Screen>
   );
+}
+
+function summarizeItems(items: PlannedActivityItem[]): DayProgress {
+  const total = items.length;
+  const completed = items.filter((item) => item.status === 'done').length;
+
+  return {
+    total,
+    completed,
+    percentage: total > 0 ? Math.round((completed / total) * 100) : 0,
+  };
 }
 
 function DayProgressCircle({
@@ -206,7 +187,7 @@ function DayProgressCircle({
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (circumference * percentage) / 100;
   const accent = getCalendarProgressColor(percentage, isFuture, isPast, hasPlanned);
-  const trackColor = isPast && hasPlanned && percentage === 0 ? 'rgba(239, 68, 68, 0.42)' : 'rgba(161, 161, 170, 0.16)';
+  const trackColor = isPast && hasPlanned && percentage === 0 ? 'rgba(239, 68, 68, 0.38)' : 'rgba(161, 161, 170, 0.14)';
   const showProgress = hasPlanned && !isFuture && percentage > 0;
 
   return (
@@ -234,6 +215,73 @@ function DayProgressCircle({
   );
 }
 
+function RoutineSection({
+  title,
+  items,
+  disabled,
+  onToggle,
+}: {
+  title: string;
+  items: PlannedActivityItem[];
+  disabled: boolean;
+  onToggle: (item: PlannedActivityItem) => void;
+}) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <View style={styles.routineSection}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <View style={styles.doneList}>
+        {items.map((item) => (
+          <CalendarRoutineRow key={item.schedule.id} item={item} disabled={disabled} onToggle={() => onToggle(item)} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function CalendarRoutineRow({ item, disabled, onToggle }: { item: PlannedActivityItem; disabled: boolean; onToggle: () => void }) {
+  const accent = getActivityColor(item.activity);
+  const Icon = getActivityIcon(item.activity);
+  const checked = item.status === 'done';
+
+  return (
+    <Pressable
+      onPress={onToggle}
+      disabled={disabled}
+      style={({ pressed }) => [
+        styles.doneRow,
+        checked && { borderColor: `${accent}66`, backgroundColor: `${accent}14` },
+        disabled && styles.disabledRow,
+        pressed && styles.pressed,
+      ]}
+    >
+      <View style={[styles.doneIcon, { backgroundColor: `${accent}22` }]}>
+        <Icon color={accent} size={18} strokeWidth={2.4} />
+      </View>
+      <View style={styles.doneCopy}>
+        <Text style={styles.doneName} numberOfLines={1}>
+          {item.activity.name}
+        </Text>
+        <Text style={styles.doneMeta} numberOfLines={1}>
+          {formatScheduleLabel(item)}
+        </Text>
+      </View>
+      {checked ? <CheckCircle2 color={accent} size={20} strokeWidth={2.4} /> : <CircleMinus color={colors.textSubtle} size={20} strokeWidth={2.4} />}
+    </Pressable>
+  );
+}
+
+function formatScheduleLabel(item: PlannedActivityItem) {
+  if (item.schedule.has_fixed_time === 1 || (item.schedule.start_time && item.schedule.end_time)) {
+    return `${item.schedule.start_time ?? '--:--'} - ${item.schedule.end_time ?? '--:--'}`;
+  }
+
+  return item.activity.category_name ?? item.activity.category ?? 'Sem horario';
+}
+
 function getCalendarProgressColor(percentage: number, isFuture: boolean, isPast: boolean, hasPlanned: boolean) {
   if (isFuture || !hasPlanned) {
     return colors.textSubtle;
@@ -243,112 +291,21 @@ function getCalendarProgressColor(percentage: number, isFuture: boolean, isPast:
     return isPast ? colors.danger : colors.textMuted;
   }
 
-  return getCompletionGradientColor(percentage);
-}
-
-function getCompletionGradientColor(percentage: number) {
-  const clamped = Math.max(0, Math.min(100, percentage));
-  const red = { r: 239, g: 68, b: 68 };
-  const yellow = { r: 250, g: 204, b: 21 };
-  const green = { r: 34, g: 197, b: 94 };
-
-  if (clamped <= 50) {
-    return interpolateRgb(red, yellow, clamped / 50);
+  if (percentage >= 85) {
+    return colors.success;
   }
 
-  return interpolateRgb(yellow, green, (clamped - 50) / 50);
-}
+  if (percentage >= 50) {
+    return colors.warning;
+  }
 
-function interpolateRgb(
-  start: { r: number; g: number; b: number },
-  end: { r: number; g: number; b: number },
-  amount: number,
-) {
-  const r = Math.round(start.r + (end.r - start.r) * amount);
-  const g = Math.round(start.g + (end.g - start.g) * amount);
-  const b = Math.round(start.b + (end.b - start.b) * amount);
-
-  return `rgb(${r}, ${g}, ${b})`;
-}
-
-function LegendItem({ color, label }: { color: string; label: string }) {
-  return (
-    <View style={styles.legendItem}>
-      <View style={[styles.legendDot, { backgroundColor: color }]} />
-      <Text style={styles.legendText}>{label}</Text>
-    </View>
-  );
+  return colors.danger;
 }
 
 function IconButton({ onPress, icon: Icon }: { onPress: () => void; icon: typeof ChevronLeft }) {
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
       <Icon color={colors.text} size={19} strokeWidth={2.5} />
-    </Pressable>
-  );
-}
-
-function RoutineSection({
-  title,
-  emptyText,
-  items,
-  disabled,
-  onToggle,
-}: {
-  title: string;
-  emptyText: string;
-  items: Array<{ routine: Routine; checked: boolean; displayName: string }>;
-  disabled: boolean;
-  onToggle: (routine: Routine, checked: boolean) => void;
-}) {
-  return (
-    <View style={styles.routineSection}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {items.length === 0 ? (
-        <Text style={styles.emptyText}>{emptyText}</Text>
-      ) : (
-        <View style={styles.doneList}>
-          {items.map((item) => (
-            <CalendarRoutineRow
-              key={item.routine.id}
-              item={item}
-              disabled={disabled}
-              onToggle={() => onToggle(item.routine, item.checked)}
-            />
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
-
-function CalendarRoutineRow({
-  item,
-  disabled,
-  onToggle,
-}: {
-  item: { routine: Routine; checked: boolean; displayName: string };
-  disabled: boolean;
-  onToggle: () => void;
-}) {
-  const { routine, checked, displayName } = item;
-  const accent = getRoutineColor(routine.color);
-  const Icon = getRoutineIcon(routine.icon);
-
-  return (
-    <Pressable onPress={onToggle} disabled={disabled} style={({ pressed }) => [styles.doneRow, checked && styles.doneRowChecked, disabled && styles.disabledRow, pressed && styles.pressed]}>
-      <View style={[styles.doneIcon, { backgroundColor: `${accent}20` }]}>
-        <Icon color={accent} size={18} strokeWidth={2.4} />
-      </View>
-      <View style={styles.doneCopy}>
-        <Text style={styles.doneName} numberOfLines={1}>
-          {displayName}
-        </Text>
-        <Text style={styles.doneMeta} numberOfLines={1}>
-          {routine.category || 'Rotina diaria'}
-        </Text>
-      </View>
-      {checked ? <CheckCircle2 color={colors.success} size={20} strokeWidth={2.4} /> : <CircleMinus color={colors.textSubtle} size={20} strokeWidth={2.4} />}
     </Pressable>
   );
 }
@@ -402,8 +359,8 @@ const styles = StyleSheet.create({
   },
   todayButton: {
     alignItems: 'center',
-    backgroundColor: 'rgba(38, 217, 255, 0.12)',
-    borderColor: 'rgba(38, 217, 255, 0.3)',
+    backgroundColor: 'rgba(20, 184, 166, 0.12)',
+    borderColor: 'rgba(20, 184, 166, 0.3)',
     borderRadius: radii.md,
     borderWidth: 1,
     height: 38,
@@ -446,7 +403,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(24, 24, 27, 0.58)',
   },
   daySelected: {
-    borderColor: colors.textMuted,
+    borderColor: colors.secondary,
     borderWidth: 2,
   },
   circleShell: {
@@ -466,51 +423,30 @@ const styles = StyleSheet.create({
   todayDayText: {
     textDecorationLine: 'underline',
   },
-  legend: {
-    borderTopColor: colors.border,
-    borderTopWidth: 1,
-    flexDirection: 'row',
-    gap: spacing.md,
-    paddingTop: spacing.md,
-  },
-  legendItem: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.xs,
-  },
-  legendDot: {
-    borderRadius: 4,
-    height: 8,
-    width: 8,
-  },
-  legendText: {
-    color: colors.textMuted,
-    fontSize: typography.tiny,
-    fontWeight: '700',
-  },
   detailCard: {
     gap: spacing.md,
   },
-  detailSummary: {
+  detailHeader: {
     alignItems: 'center',
-    backgroundColor: 'rgba(161, 161, 170, 0.08)',
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    borderWidth: 1,
     flexDirection: 'row',
     gap: spacing.md,
-    padding: spacing.lg,
+    justifyContent: 'space-between',
+  },
+  detailDate: {
+    color: colors.text,
+    fontSize: typography.h3,
+    fontWeight: '900',
+  },
+  detailSubtitle: {
+    color: colors.textMuted,
+    fontSize: typography.small,
+    fontWeight: '700',
+    marginTop: spacing.xs,
   },
   detailPercent: {
     color: colors.text,
-    fontSize: 30,
-    fontWeight: '800',
-  },
-  detailText: {
-    color: colors.text,
-    flex: 1,
-    fontSize: typography.body,
-    fontWeight: '800',
+    fontSize: 32,
+    fontWeight: '900',
   },
   routineSection: {
     gap: spacing.sm,
@@ -519,10 +455,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: typography.body,
     fontWeight: '900',
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: typography.small,
   },
   doneList: {
     gap: spacing.md,
@@ -533,12 +465,10 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     minHeight: 58,
     borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: spacing.md,
     backgroundColor: 'rgba(161, 161, 170, 0.08)',
-  },
-  doneRowChecked: {
-    borderColor: 'rgba(49, 208, 138, 0.28)',
-    borderWidth: 1,
   },
   disabledRow: {
     opacity: 0.56,

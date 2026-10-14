@@ -1,7 +1,8 @@
-import { BarChart3, CalendarRange, Home, ListChecks, Timer } from 'lucide-react-native';
+import { BarChart3, CalendarDays, CalendarRange, Home, ListChecks, Timer } from 'lucide-react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import type { RootTabParamList } from '../types';
 import { DashboardScreen } from '../features/dashboard/DashboardScreen';
+import { CalendarScreen } from '../features/calendar/CalendarScreen';
 import { QtsScreen } from '../features/qts/QtsScreen';
 import { RoutinesScreen } from '../features/routines/RoutinesScreen';
 import { StatsScreen } from '../features/stats/StatsScreen';
@@ -52,6 +53,14 @@ export function BottomTabs() {
         options={{
           title: 'QTS',
           tabBarIcon: ({ color, size }) => <CalendarRange color={color} size={size} />,
+        }}
+      />
+      <Tab.Screen
+        name="Calendar"
+        component={CalendarScreen}
+        options={{
+          title: 'Calend.',
+          tabBarIcon: ({ color, size }) => <CalendarDays color={color} size={size} />,
         }}
       />
       <Tab.Screen

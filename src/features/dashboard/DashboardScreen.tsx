@@ -34,10 +34,10 @@ export function DashboardScreen() {
   const plannedCount = items.length;
   const progress = plannedCount > 0 ? Math.round((doneCount / plannedCount) * 100) : 0;
   const fixedItems = useMemo(
-    () => items.filter((item) => item.schedule.has_fixed_time === 1).sort((a, b) => (a.schedule.start_time ?? '').localeCompare(b.schedule.start_time ?? '')),
+    () => items.filter((item) => isFixedSchedule(item)).sort((a, b) => (a.schedule.start_time ?? '').localeCompare(b.schedule.start_time ?? '')),
     [items],
   );
-  const looseItems = useMemo(() => items.filter((item) => item.schedule.has_fixed_time !== 1), [items]);
+  const looseItems = useMemo(() => items.filter((item) => !isFixedSchedule(item)), [items]);
   const isFuture = selectedDate > todayKey();
 
   function changeDate(amount: number) {
@@ -125,7 +125,7 @@ function ActivityRow({ item, disabled, onToggle }: { item: PlannedActivityItem; 
   const Icon = getActivityIcon(item.activity);
   const done = item.status === 'done';
   const notDone = item.status === 'not_done';
-  const timeLabel = item.schedule.has_fixed_time === 1 ? `${item.schedule.start_time ?? '--:--'}-${item.schedule.end_time ?? '--:--'}` : 'Sem horario';
+  const timeLabel = isFixedSchedule(item) ? `${item.schedule.start_time ?? '--:--'}-${item.schedule.end_time ?? '--:--'}` : 'Sem horario';
 
   return (
     <Pressable onPress={onToggle} disabled={disabled} style={({ pressed }) => [styles.row, done && styles.rowDone, notDone && styles.rowNotDone, disabled && styles.rowDisabled, pressed && styles.pressed]}>
@@ -153,6 +153,10 @@ function ActivityRow({ item, disabled, onToggle }: { item: PlannedActivityItem; 
       </View>
     </Pressable>
   );
+}
+
+function isFixedSchedule(item: PlannedActivityItem) {
+  return item.schedule.has_fixed_time === 1 || Boolean(item.schedule.start_time && item.schedule.end_time);
 }
 
 function getStatusLabel(status: PlannedActivityItem['status']) {

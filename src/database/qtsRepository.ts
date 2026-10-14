@@ -79,10 +79,10 @@ export async function getStudyActivities() {
         c.color as category_color
       FROM activities a
       LEFT JOIN categories c ON c.id = a.category_id
-      WHERE a.archived_at IS NULL AND a.is_active = 1
+      WHERE a.archived_at IS NULL
+        AND a.is_active = 1
+        AND lower(COALESCE(c.name, a.category, '')) IN ('estudo', 'estudos')
       ORDER BY
-        CASE WHEN lower(c.name) = 'estudos' THEN 0 ELSE 1 END,
-        CASE WHEN a.type = 'study' THEN 0 ELSE 1 END,
         c.sort_order ASC,
         a.name ASC
     `,

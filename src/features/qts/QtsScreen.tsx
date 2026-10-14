@@ -1,16 +1,16 @@
-import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { CalendarRange, Clock3, Plus } from 'lucide-react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import * as ScreenOrientation from 'expo-screen-orientation';
+import { CalendarRange, Expand, Plus, X } from 'lucide-react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { Screen } from '../../components/Screen';
-import { SectionHeader } from '../../components/SectionHeader';
-import { createCategory, getActivitiesWithSchedules, getCategories, updateActivity } from '../../database';
+import { getActivitiesWithSchedules, getCategories, updateActivity } from '../../database';
 import { colors, radii, spacing, typography } from '../../theme';
-import type { ActivityFormValues, ActivityWithSchedules, Category, CategoryFormValues, RootTabParamList, WeeklySchedule } from '../../types';
+import type { ActivityFormValues, ActivityWithSchedules, Category, RootTabParamList, WeeklySchedule } from '../../types';
 import { getActivityColor } from '../../utils/routineVisuals';
 import { RoutineFormModal } from '../routines/RoutineFormModal';
 
@@ -29,13 +29,22 @@ type QtsItem = {
   schedule: WeeklySchedule;
 };
 
+type QtsRow = {
+  key: string;
+  label: string;
+  sortValue: string;
+  cells: Map<number, QtsItem[]>;
+};
+
 export function QtsScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
   const [activities, setActivities] = useState<ActivityWithSchedules[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [editingActivity, setEditingActivity] = useState<ActivityWithSchedules | null>(null);
   const [saving, setSaving] = useState(false);
+  const [fullTableVisible, setFullTableVisible] = useState(false);
+  const today = new Date().getDay();
+  const todayInfo = WEEKDAYS.find((day) => day.value === today) ?? WEEKDAYS[0];
 
   const loadQts = useCallback(async () => {
     const [activityRows, categoryRows] = await Promise.all([getActivitiesWithSchedules(false), getCategories(false)]);
@@ -50,60 +59,9 @@ export function QtsScreen() {
     }, [loadQts]),
   );
 
-  const filteredActivities = useMemo(
-    () => (selectedCategoryId ? activities.filter((activity) => activity.category_id === selectedCategoryId) : activities),
-    [activities, selectedCategoryId],
-  );
-
-  const scheduledByDay = useMemo(() => {
-    const map = new Map<number, QtsItem[]>();
-
-    for (const day of WEEKDAYS) {
-      map.set(day.value, []);
-    }
-
-    for (const activity of filteredActivities) {
-      for (const schedule of activity.schedules) {
-        if (schedule.has_fixed_time === 1) {
-          map.get(schedule.weekday)?.push({ activity, schedule });
-        }
-      }
-    }
-
-    for (const items of map.values()) {
-      items.sort((a, b) => (a.schedule.start_time ?? '99:99').localeCompare(b.schedule.start_time ?? '99:99'));
-    }
-
-    return map;
-  }, [filteredActivities]);
-
-  const flexibleByDay = useMemo(() => {
-    const map = new Map<number, QtsItem[]>();
-
-    for (const day of WEEKDAYS) {
-      map.set(day.value, []);
-    }
-
-    for (const activity of filteredActivities) {
-      for (const schedule of activity.schedules) {
-        if (schedule.has_fixed_time !== 1) {
-          map.get(schedule.weekday)?.push({ activity, schedule });
-        }
-      }
-    }
-
-    for (const items of map.values()) {
-      items.sort((a, b) => a.activity.name.localeCompare(b.activity.name));
-    }
-
-    return map;
-  }, [filteredActivities]);
-
-  const hasAnyActivity = filteredActivities.some((activity) => activity.schedules.length > 0);
-
-  function openEdit(activity: ActivityWithSchedules) {
-    setEditingActivity(activity);
-  }
+  const tableRows = useMemo(() => buildQtsRows(activities), [activities]);
+  const todayItems = useMemo(() => buildDayItems(activities, today), [activities, today]);
+  const hasAnyActivity = tableRows.some((row) => WEEKDAYS.some((day) => (row.cells.get(day.value)?.length ?? 0) > 0));
 
   async function handleSave(values: ActivityFormValues) {
     if (!editingActivity) {
@@ -121,70 +79,43 @@ export function QtsScreen() {
     }
   }
 
-  async function handleCreateCategory(values: CategoryFormValues) {
-    const category = await createCategory(values);
-    await loadQts();
-
-    return category;
-  }
-
   return (
     <Screen contentStyle={styles.screen}>
       <View style={styles.header}>
         <View style={styles.headerCopy}>
           <Text style={styles.title}>QTS</Text>
-          <Text style={styles.subtitle}>Quadro semanal de rotinas</Text>
+          <Text style={styles.subtitle}>Hoje - {todayInfo.label}</Text>
         </View>
         <PrimaryButton label="Nova" icon={Plus} onPress={() => navigation.navigate('Routines')} style={styles.addButton} />
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
-        <FilterPill label="Todas" selected={!selectedCategoryId} onPress={() => setSelectedCategoryId(null)} />
-        {categories.map((category) => (
-          <FilterPill
-            key={category.id}
-            label={category.name}
-            color={category.color}
-            selected={selectedCategoryId === category.id}
-            onPress={() => setSelectedCategoryId(category.id)}
-          />
-        ))}
-      </ScrollView>
-
       {!hasAnyActivity ? (
-        <EmptyState icon={CalendarRange} title="QTS vazio" subtitle="Crie rotinas com dias da semana para montar seu quadro." />
+        <EmptyState icon={CalendarRange} title="QTS vazio" subtitle="Crie uma rotina com dias da semana para montar sua agenda." />
       ) : (
         <>
-          <SectionHeader title="Com horario fixo" subtitle="Atividades ordenadas por horario" />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.weekScroll}>
-            {WEEKDAYS.map((day) => (
-              <DayColumn key={day.value} day={day.label} items={scheduledByDay.get(day.value) ?? []} onEdit={openEdit} />
-            ))}
-          </ScrollView>
-
-          <SectionHeader title="Sem horario fixo" subtitle="Previstas por dia, com lembrete opcional" />
-          <View style={styles.flexList}>
-            {WEEKDAYS.map((day) => {
-              const items = flexibleByDay.get(day.value) ?? [];
-
-              if (items.length === 0) {
-                return null;
-              }
-
-              return (
-                <Card key={day.value} style={styles.flexCard}>
-                  <Text style={styles.flexDay}>{day.label}</Text>
-                  <View style={styles.flexItems}>
-                    {items.map((item) => (
-                      <QtsPill key={item.schedule.id} item={item} onPress={() => openEdit(item.activity)} />
-                    ))}
-                  </View>
-                </Card>
-              );
-            })}
+          <View style={styles.actionRow}>
+            <PrimaryButton label="Semana" icon={Expand} onPress={() => setFullTableVisible(true)} variant="secondary" />
           </View>
+
+          <Card style={styles.todayCard}>
+            <View style={styles.todayHeader}>
+              <Text style={styles.todayTitle}>Rotinas de hoje</Text>
+              <Text style={styles.todayCount}>{todayItems.length}</Text>
+            </View>
+            {todayItems.length === 0 ? (
+              <Text style={styles.emptyText}>Nenhuma rotina planejada para hoje.</Text>
+            ) : (
+              <View style={styles.todayList}>
+                {todayItems.map((item) => (
+                  <DayAgendaItem key={item.schedule.id} item={item} onPress={() => setEditingActivity(item.activity)} />
+                ))}
+              </View>
+            )}
+          </Card>
         </>
       )}
+
+      <FullQtsModal visible={fullTableVisible} rows={tableRows} onClose={() => setFullTableVisible(false)} onEdit={setEditingActivity} />
 
       <RoutineFormModal
         visible={Boolean(editingActivity)}
@@ -192,89 +123,206 @@ export function QtsScreen() {
         categories={categories}
         saving={saving}
         onClose={() => setEditingActivity(null)}
-        onCreateCategory={handleCreateCategory}
         onSubmit={handleSave}
       />
     </Screen>
   );
 }
 
-function DayColumn({ day, items, onEdit }: { day: string; items: QtsItem[]; onEdit: (activity: ActivityWithSchedules) => void }) {
-  return (
-    <Card style={styles.dayColumn}>
-      <Text style={styles.dayTitle}>{day}</Text>
-      {items.length === 0 ? (
-        <Text style={styles.emptyDay}>Sem horario</Text>
-      ) : (
-        <View style={styles.dayItems}>
-          {items.map((item) => (
-            <QtsBlock key={item.schedule.id} item={item} onPress={() => onEdit(item.activity)} />
-          ))}
-        </View>
-      )}
-    </Card>
-  );
-}
-
-function QtsBlock({ item, onPress }: { item: QtsItem; onPress: () => void }) {
-  const accent = getActivityColor(item.activity);
-
-  return (
-    <Pressable onPress={onPress} style={[styles.qtsBlock, { borderLeftColor: accent }]}>
-      <View style={styles.timeRow}>
-        <Clock3 color={colors.textMuted} size={13} />
-        <Text style={styles.timeText}>
-          {item.schedule.start_time ?? '--:--'}-{item.schedule.end_time ?? '--:--'}
-        </Text>
-      </View>
-      <Text style={styles.blockName} numberOfLines={2}>
-        {item.activity.name}
-      </Text>
-      {item.activity.category_name || item.activity.category ? (
-        <Text style={styles.blockCategory} numberOfLines={1}>
-          {item.activity.category_name ?? item.activity.category}
-        </Text>
-      ) : null}
-    </Pressable>
-  );
-}
-
-function QtsPill({ item, onPress }: { item: QtsItem; onPress: () => void }) {
-  const accent = getActivityColor(item.activity);
-
-  return (
-    <Pressable onPress={onPress} style={[styles.flexPill, { borderColor: `${accent}77`, backgroundColor: `${accent}14` }]}>
-      <Text style={styles.flexName} numberOfLines={1}>
-        {item.activity.name}
-      </Text>
-      {item.schedule.reminder_time ? <Text style={styles.flexReminder}>{item.schedule.reminder_time}</Text> : null}
-    </Pressable>
-  );
-}
-
-function FilterPill({
-  label,
-  color,
-  selected,
-  onPress,
+function FullQtsModal({
+  visible,
+  rows,
+  onClose,
+  onEdit,
 }: {
-  label: string;
-  color?: string | null;
-  selected: boolean;
-  onPress: () => void;
+  visible: boolean;
+  rows: QtsRow[];
+  onClose: () => void;
+  onEdit: (activity: ActivityWithSchedules) => void;
 }) {
-  const accent = color ?? colors.secondary;
+  useEffect(() => {
+    if (!visible) {
+      return undefined;
+    }
+
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => undefined);
+
+    return () => {
+      void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => undefined);
+    };
+  }, [visible]);
 
   return (
-    <Pressable
-      onPress={onPress}
-      style={[styles.filterPill, selected && { borderColor: accent, backgroundColor: `${accent}18` }]}
-    >
-      <Text style={[styles.filterText, selected && styles.filterTextActive]} numberOfLines={1}>
-        {label}
-      </Text>
+    <Modal visible={visible} animationType="fade" onRequestClose={onClose}>
+      <View style={styles.fullScreen}>
+        <Pressable accessibilityLabel="Fechar tabela semanal" onPress={onClose} style={styles.closeButton}>
+          <X color={colors.textMuted} size={16} />
+        </Pressable>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.fullTableScroll}>
+          <View style={styles.table}>
+            <View style={styles.tableHeaderRow}>
+              <View style={[styles.headerCell, styles.timeHeaderCell]}>
+                <Text style={styles.headerText}>Horario</Text>
+              </View>
+              {WEEKDAYS.map((day) => (
+                <View key={day.value} style={styles.headerCell}>
+                  <Text style={styles.headerText}>{day.short}</Text>
+                </View>
+              ))}
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {rows.map((row) => (
+                <View key={row.key} style={styles.tableRow}>
+                  <View style={styles.timeCell}>
+                    <Text style={styles.timeText}>{row.label}</Text>
+                  </View>
+                  {WEEKDAYS.map((day) => (
+                    <View key={`${row.key}-${day.value}`} style={styles.dayCell}>
+                      <CellItems items={row.cells.get(day.value) ?? []} onPress={onEdit} />
+                    </View>
+                  ))}
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+function DayAgendaItem({ item, onPress }: { item: QtsItem; onPress: () => void }) {
+  const accent = getActivityColor(item.activity);
+  const fixed = isFixedSchedule(item.schedule);
+  const time = fixed ? `${item.schedule.start_time ?? '--:--'} - ${item.schedule.end_time ?? '--:--'}` : 'Sem horario';
+
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.agendaItem, pressed && styles.agendaPressed]}>
+      <View style={[styles.agendaMarker, { backgroundColor: accent }]} />
+      <View style={styles.agendaCopy}>
+        <Text style={styles.agendaTime}>{time}</Text>
+        <Text style={styles.agendaName} numberOfLines={2}>
+          {item.activity.name}
+        </Text>
+        {item.activity.category_name || item.activity.category ? (
+          <Text style={styles.agendaCategory} numberOfLines={1}>
+            {item.activity.category_name ?? item.activity.category}
+          </Text>
+        ) : null}
+      </View>
     </Pressable>
   );
+}
+
+function CellItems({ items, onPress }: { items: QtsItem[]; onPress: (activity: ActivityWithSchedules) => void }) {
+  if (items.length === 0) {
+    return <Text style={styles.emptyCell}>-</Text>;
+  }
+
+  return (
+    <View style={styles.cellStack}>
+      {items.map((item) => (
+        <Pressable
+          key={item.schedule.id}
+          onPress={() => onPress(item.activity)}
+          style={({ pressed }) => [
+            styles.cellItem,
+            {
+              borderColor: `${getActivityColor(item.activity)}77`,
+              backgroundColor: `${getActivityColor(item.activity)}20`,
+            },
+            pressed && styles.cellItemPressed,
+          ]}
+        >
+          <Text style={[styles.cellItemText, { color: getActivityColor(item.activity) }]} numberOfLines={2}>
+            {item.activity.name}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+function buildDayItems(activities: ActivityWithSchedules[], weekday: number) {
+  const items: QtsItem[] = [];
+
+  for (const activity of activities) {
+    for (const schedule of activity.schedules) {
+      if (schedule.weekday === weekday) {
+        items.push({ activity, schedule });
+      }
+    }
+  }
+
+  return items.sort((a, b) => {
+    const aTime = isFixedSchedule(a.schedule) ? a.schedule.start_time ?? '99:99' : '99:99';
+    const bTime = isFixedSchedule(b.schedule) ? b.schedule.start_time ?? '99:99' : '99:99';
+
+    return aTime.localeCompare(bTime) || a.activity.name.localeCompare(b.activity.name);
+  });
+}
+
+function buildQtsRows(activities: ActivityWithSchedules[]) {
+  const rows = new Map<string, QtsRow>();
+  const flexibleRow = createRow('flexible', 'Sem horario', '99:99');
+
+  for (const activity of activities) {
+    for (const schedule of activity.schedules) {
+      const targetRow = isFixedSchedule(schedule) ? getOrCreateRow(rows, schedule) : flexibleRow;
+      const cell = targetRow.cells.get(schedule.weekday) ?? [];
+
+      cell.push({ activity, schedule });
+      targetRow.cells.set(schedule.weekday, cell);
+    }
+  }
+
+  for (const row of rows.values()) {
+    sortCells(row);
+  }
+
+  sortCells(flexibleRow);
+
+  const fixedRows = [...rows.values()].sort((a, b) => a.sortValue.localeCompare(b.sortValue));
+  const hasFlexibleItems = WEEKDAYS.some((day) => (flexibleRow.cells.get(day.value)?.length ?? 0) > 0);
+
+  return hasFlexibleItems ? [...fixedRows, flexibleRow] : fixedRows;
+}
+
+function isFixedSchedule(schedule: WeeklySchedule) {
+  return schedule.has_fixed_time === 1 || Boolean(schedule.start_time && schedule.end_time);
+}
+
+function getOrCreateRow(rows: Map<string, QtsRow>, schedule: WeeklySchedule) {
+  const start = schedule.start_time ?? '--:--';
+  const end = schedule.end_time ?? '--:--';
+  const key = `${start}-${end}`;
+  const existing = rows.get(key);
+
+  if (existing) {
+    return existing;
+  }
+
+  const row = createRow(key, `${start}\n${end}`, start);
+  rows.set(key, row);
+
+  return row;
+}
+
+function createRow(key: string, label: string, sortValue: string): QtsRow {
+  const cells = new Map<number, QtsItem[]>();
+
+  for (const day of WEEKDAYS) {
+    cells.set(day.value, []);
+  }
+
+  return { key, label, sortValue, cells };
+}
+
+function sortCells(row: QtsRow) {
+  for (const items of row.cells.values()) {
+    items.sort((a, b) => a.activity.name.localeCompare(b.activity.name));
+  }
 }
 
 const styles = StyleSheet.create({
@@ -305,109 +353,182 @@ const styles = StyleSheet.create({
   addButton: {
     minWidth: 98,
   },
-  filterScroll: {
-    gap: spacing.sm,
-    paddingRight: spacing.lg,
+  actionRow: {
+    alignItems: 'stretch',
   },
-  filterPill: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: 'rgba(161, 161, 170, 0.06)',
-    maxWidth: 150,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  filterText: {
-    color: colors.textMuted,
-    fontSize: typography.small,
-    fontWeight: '800',
-  },
-  filterTextActive: {
-    color: colors.text,
-  },
-  weekScroll: {
-    gap: spacing.md,
-    paddingRight: spacing.lg,
-  },
-  dayColumn: {
-    width: 172,
+  todayCard: {
     gap: spacing.md,
   },
-  dayTitle: {
+  todayHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  todayTitle: {
     color: colors.text,
-    fontSize: typography.body,
+    fontSize: typography.h3,
     fontWeight: '900',
   },
-  emptyDay: {
+  todayCount: {
+    color: colors.text,
+    fontSize: typography.small,
+    fontWeight: '900',
+    minWidth: 32,
+    overflow: 'hidden',
+    textAlign: 'center',
+    borderRadius: 16,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    backgroundColor: 'rgba(20, 184, 166, 0.18)',
+  },
+  todayList: {
+    gap: spacing.sm,
+  },
+  agendaItem: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.md,
+    borderRadius: radii.md,
+    backgroundColor: 'rgba(161, 161, 170, 0.07)',
+    padding: spacing.md,
+  },
+  agendaPressed: {
+    backgroundColor: 'rgba(20, 184, 166, 0.12)',
+  },
+  agendaMarker: {
+    width: 4,
+    alignSelf: 'stretch',
+    borderRadius: 999,
+  },
+  agendaCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  agendaTime: {
+    color: colors.textMuted,
+    fontSize: typography.tiny,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  agendaName: {
+    color: colors.text,
+    fontSize: typography.body,
+    fontWeight: '800',
+    marginTop: spacing.xs,
+  },
+  agendaCategory: {
     color: colors.textSubtle,
     fontSize: typography.small,
     fontWeight: '700',
+    marginTop: spacing.xs,
   },
-  dayItems: {
-    gap: spacing.sm,
+  emptyText: {
+    color: colors.textMuted,
+    fontSize: typography.small,
+    fontWeight: '700',
   },
-  qtsBlock: {
-    borderLeftWidth: 3,
-    borderRadius: radii.md,
-    backgroundColor: 'rgba(161, 161, 170, 0.07)',
-    gap: spacing.xs,
+  fullScreen: {
+    flex: 1,
+    backgroundColor: colors.background,
     padding: spacing.md,
   },
-  timeRow: {
+  closeButton: {
+    position: 'absolute',
+    right: spacing.sm,
+    top: spacing.sm,
+    zIndex: 2,
+    width: 30,
+    height: 30,
     alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 15,
+    backgroundColor: 'rgba(27, 30, 36, 0.86)',
+  },
+  fullTableScroll: {
+    paddingTop: 36,
+    paddingBottom: spacing.md,
+  },
+  table: {
+    minWidth: 912,
+    overflow: 'hidden',
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  tableHeaderRow: {
     flexDirection: 'row',
-    gap: spacing.xs,
+    backgroundColor: colors.surfaceStrong,
+  },
+  tableRow: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  headerCell: {
+    width: 118,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderLeftWidth: 1,
+    borderLeftColor: colors.border,
+    paddingHorizontal: spacing.sm,
+  },
+  timeHeaderCell: {
+    width: 86,
+    borderLeftWidth: 0,
+  },
+  headerText: {
+    color: colors.text,
+    fontSize: typography.small,
+    fontWeight: '900',
+  },
+  timeCell: {
+    width: 86,
+    minHeight: 82,
+    justifyContent: 'center',
+    padding: spacing.sm,
+    backgroundColor: 'rgba(161, 161, 170, 0.04)',
   },
   timeText: {
     color: colors.textMuted,
     fontSize: typography.tiny,
     fontWeight: '900',
+    lineHeight: 16,
+    textAlign: 'center',
   },
-  blockName: {
-    color: colors.text,
-    fontSize: typography.small,
-    fontWeight: '900',
+  dayCell: {
+    width: 118,
+    minHeight: 82,
+    borderLeftWidth: 1,
+    borderLeftColor: colors.border,
+    padding: spacing.xs,
   },
-  blockCategory: {
+  emptyCell: {
     color: colors.textSubtle,
     fontSize: typography.tiny,
     fontWeight: '700',
+    textAlign: 'center',
+    marginTop: spacing.md,
   },
-  flexList: {
-    gap: spacing.md,
+  cellStack: {
+    gap: spacing.xs,
   },
-  flexCard: {
-    gap: spacing.md,
-  },
-  flexDay: {
-    color: colors.text,
-    fontSize: typography.body,
-    fontWeight: '900',
-  },
-  flexItems: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  flexPill: {
-    alignItems: 'center',
-    borderRadius: 999,
+  cellItem: {
+    minHeight: 34,
+    justifyContent: 'center',
+    borderRadius: radii.sm,
     borderWidth: 1,
-    flexDirection: 'row',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
   },
-  flexName: {
+  cellItemPressed: {
+    opacity: 0.8,
+  },
+  cellItemText: {
     color: colors.text,
-    fontSize: typography.small,
-    fontWeight: '800',
-    maxWidth: 190,
-  },
-  flexReminder: {
-    color: colors.textMuted,
     fontSize: typography.tiny,
-    fontWeight: '900',
+    fontWeight: '800',
+    lineHeight: 14,
   },
 });

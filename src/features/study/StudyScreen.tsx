@@ -46,6 +46,7 @@ export function StudyScreen() {
   const [customFocus, setCustomFocus] = useState('30');
   const [customBreak, setCustomBreak] = useState('5');
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
+  const [lastFinishedSession, setLastFinishedSession] = useState<{ name: string; seconds: number } | null>(null);
   const [tick, setTick] = useState(0);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const breakWarningRef = useRef(false);
@@ -161,7 +162,7 @@ export function StudyScreen() {
   function startStudy() {
     const focusMinutes = selectedPreset.label === 'Personalizado' ? parsePositiveMinute(customFocus, 30) : selectedPreset.focus;
     const breakMinutes = selectedPreset.label === 'Personalizado' ? parsePositiveMinute(customBreak, 5) : selectedPreset.break;
-    const activityName = selectedActivity?.name ?? manualActivityName.trim() || 'Estudo livre';
+    const activityName = selectedActivity?.name ?? (manualActivityName.trim() || 'Estudo livre');
 
     setActiveSession({
       activity: selectedActivity,
@@ -176,10 +177,19 @@ export function StudyScreen() {
       focusStudyMs: 0,
       focusBreaksCount: 0,
     });
+    setLastFinishedSession(null);
   }
 
   function pauseStudy() {
-    setActiveSession((current) => (current && !current.pausedAtMs && current.phase !== 'finished' ? { ...current, pausedAtMs: Date.now() } : current));
+    setActiveSession((current) =>
+      current && !current.pausedAtMs && current.phase !== 'finished'
+        ? {
+            ...current,
+            pausedAtMs: Date.now(),
+            focusBreaksCount: current.phase === 'focus' ? current.focusBreaksCount + 1 : current.focusBreaksCount,
+          }
+        : current,
+    );
   }
 
   function resumeStudy() {
@@ -219,6 +229,7 @@ export function StudyScreen() {
       endedAt: new Date().toISOString(),
     });
 
+    setLastFinishedSession({ name: activeSession.activityName, seconds: actualStudySeconds });
     setActiveSession(null);
     await loadStudyData();
   }
@@ -229,7 +240,7 @@ export function StudyScreen() {
     <Screen contentStyle={styles.screen}>
       <View style={styles.header}>
         <Text style={styles.title}>Estudo</Text>
-        <Text style={styles.subtitle}>Cronometro com registro local</Text>
+        <Text style={styles.subtitle}>Cronometro apenas para estudos</Text>
       </View>
 
       {activeSession ? (
@@ -237,9 +248,9 @@ export function StudyScreen() {
       ) : (
         <>
           <Card style={styles.cardGap}>
-            <SectionHeader title="Atividade" subtitle="Use rotinas do tipo estudo ou registre livremente" />
+            <SectionHeader title="Estudo" subtitle="Rotinas da categoria Estudos" />
             {activities.length === 0 ? (
-              <TextField label="Nome da atividade" value={manualActivityName} onChangeText={setManualActivityName} placeholder="Ex.: CNPI" />
+              <TextField label="Nome do estudo" value={manualActivityName} onChangeText={setManualActivityName} placeholder="Ex.: CNPI" />
             ) : (
               <View style={styles.activityGroups}>
                 {groupActivitiesByCategory(activities).map((group) => (
@@ -270,7 +281,7 @@ export function StudyScreen() {
           </Card>
 
           <Card style={styles.cardGap}>
-            <SectionHeader title="Modelo" subtitle="Estudo / pausa" />
+            <SectionHeader title="Tempo" subtitle="Estudo e pausa" />
             <View style={styles.presetGrid}>
               {PRESETS.map((preset, index) => {
                 const selected = index === presetIndex;
@@ -295,6 +306,14 @@ export function StudyScreen() {
           </Card>
         </>
       )}
+
+      {lastFinishedSession ? (
+        <Card style={styles.finishedCard}>
+          <Text style={styles.finishedLabel}>Ultimo estudo finalizado</Text>
+          <Text style={styles.finishedName} numberOfLines={1}>{lastFinishedSession.name}</Text>
+          <Text style={styles.finishedValue}>{formatDuration(lastFinishedSession.seconds)}</Text>
+        </Card>
+      ) : null}
 
       <Card style={styles.cardGap}>
         <SectionHeader title="Hoje" subtitle="Tempo registrado" />
@@ -370,6 +389,10 @@ function formatClock(ms: number) {
 }
 
 function formatDuration(totalSeconds: number) {
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
 
@@ -517,6 +540,27 @@ const styles = StyleSheet.create({
   },
   timerButton: {
     flex: 1,
+  },
+  finishedCard: {
+    gap: spacing.xs,
+    borderColor: 'rgba(20, 184, 166, 0.28)',
+    backgroundColor: 'rgba(20, 184, 166, 0.08)',
+  },
+  finishedLabel: {
+    color: colors.textMuted,
+    fontSize: typography.tiny,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  finishedName: {
+    color: colors.text,
+    fontSize: typography.body,
+    fontWeight: '900',
+  },
+  finishedValue: {
+    color: colors.secondary,
+    fontSize: typography.h2,
+    fontWeight: '900',
   },
   studyValue: {
     color: colors.text,

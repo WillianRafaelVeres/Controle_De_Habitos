@@ -3,7 +3,7 @@
     "name": "Rotina Estrat\u00e9gica",
     "slug": "controle-de-habitos",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
@@ -29,7 +29,8 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-screen-orientation"
     ],
     "extra": {
       "eas": {

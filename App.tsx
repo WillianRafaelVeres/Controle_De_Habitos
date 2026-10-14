@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { StatusBar } from 'expo-status-bar';
 import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { BottomTabs } from './src/navigation/BottomTabs';
 import { initDatabase, seedInitialRoutines } from './src/database';
@@ -12,6 +14,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => undefined);
+
     async function prepareApp() {
       try {
         await initDatabase();
@@ -47,29 +51,34 @@ export default function App() {
   }
 
   return (
-    <SafeAreaProvider>
-      <NavigationContainer
-        theme={{
-          ...DefaultTheme,
-          dark: true,
-          colors: {
-            ...DefaultTheme.colors,
-            background: colors.background,
-            card: colors.surfaceStrong,
-            text: colors.text,
-            border: colors.border,
-            primary: colors.secondary,
-          },
-        }}
-      >
-        <BottomTabs />
-      </NavigationContainer>
-      <StatusBar style="light" />
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={styles.appRoot}>
+      <SafeAreaProvider>
+        <NavigationContainer
+          theme={{
+            ...DefaultTheme,
+            dark: true,
+            colors: {
+              ...DefaultTheme.colors,
+              background: colors.background,
+              card: colors.surfaceStrong,
+              text: colors.text,
+              border: colors.border,
+              primary: colors.secondary,
+            },
+          }}
+        >
+          <BottomTabs />
+        </NavigationContainer>
+        <StatusBar style="light" />
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
+  appRoot: {
+    flex: 1,
+  },
   loading: {
     flex: 1,
     backgroundColor: colors.background,
